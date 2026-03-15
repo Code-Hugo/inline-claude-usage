@@ -273,8 +273,50 @@ async function main() {
     }
   }
 
-  // ── 5. Display options ────────────────────────────────────────────────────
-  console.log(bold('  Step 5 — Display\n'));
+  // ── 5. Weekly reset schedule ─────────────────────────────────────────────
+  console.log(bold('  Step 5 — Weekly reset schedule\n'));
+  console.log(`  ${dim('Open claude.ai → Settings → Usage and look for "Resets Sun 1:00 PM"')}`);
+  console.log(`  ${dim('or similar. Enter exactly what it shows.\n')}`);
+
+  const DOW_MAP = { sun:0, sunday:0, mon:1, monday:1, tue:2, tuesday:2,
+                    wed:3, wednesday:3, thu:4, thursday:4, fri:5, friday:5, sat:6, saturday:6 };
+  const DOW_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  const existingResetDay  = existing.weeklyResetDay  ?? 0;
+  const existingResetHour = existing.weeklyResetHour ?? 13;
+  const existingResetMin  = existing.weeklyResetMinute ?? 0;
+  const defResetStr = `${DOW_NAMES[existingResetDay]} ${existingResetHour % 12 || 12}:${String(existingResetMin).padStart(2,'0')} ${existingResetHour >= 12 ? 'PM' : 'AM'}`;
+
+  let weeklyResetDay = existingResetDay;
+  let weeklyResetHour = existingResetHour;
+  let weeklyResetMinute = existingResetMin;
+
+  const resetRaw = await ask(rl, `  ${cyan('?')} Weekly reset day & time ${dim(`[${defResetStr}]`)}: `);
+  if (resetRaw.trim()) {
+    // Parse "Sun 1:00 PM", "Sunday 13:00", "Mon 9:30 AM", etc.
+    const lower = resetRaw.toLowerCase();
+    const dayMatch = lower.match(/^(sun(?:day)?|mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?)/);
+    if (dayMatch) {
+      weeklyResetDay = DOW_MAP[dayMatch[1]] ?? existingResetDay;
+      const timeMatch = lower.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/);
+      if (timeMatch) {
+        let h = parseInt(timeMatch[1]);
+        const m = parseInt(timeMatch[2]);
+        const ampm = timeMatch[3];
+        if (ampm === 'pm' && h < 12) h += 12;
+        if (ampm === 'am' && h === 12) h = 0;
+        weeklyResetHour   = h;
+        weeklyResetMinute = m;
+      }
+    } else {
+      console.log(yellow(`  Could not parse "${resetRaw}" — keeping existing value.`));
+    }
+  }
+  const resetLabel = `${DOW_NAMES[weeklyResetDay]} ${weeklyResetHour % 12 || 12}:${String(weeklyResetMinute).padStart(2,'0')} ${weeklyResetHour >= 12 ? 'PM' : 'AM'}`;
+  console.log(`  ${green('✓')} Weekly reset: ${resetLabel}\n`);
+
+  // ── 6. Display options ────────────────────────────────────────────────────
+  console.log(bold('  Step 6 — Display\n'));
   const defDisabled = existing.disabled === true ? 'Y' : 'n';
   const disableRaw  = await ask(rl, `  ${cyan('?')} Disable status line? ${dim(`[${defDisabled}]`)}: `);
   const disabled    = disableRaw === '' ? existing.disabled === true : disableRaw.toLowerCase() === 'y';
@@ -291,7 +333,9 @@ async function main() {
     sessionLimitTokens,
     weeklyLimitTokens,
     sessionWindowHours: 5,
-    weeklyWindowDays: 7,
+    weeklyResetDay,
+    weeklyResetHour,
+    weeklyResetMinute,
     disabled,
     pricing: {
       'claude-opus-4-6':           { input: 15.00, cacheRead: 1.50, cacheWrite: 18.75, output: 75.00 },

@@ -7,9 +7,9 @@
  * https://github.com/Code-Hugo/inline-claude-usage
  */
 
-const fs  = require('fs');
+const fs   = require('fs');
 const path = require('path');
-const os  = require('os');
+const os   = require('os');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -22,7 +22,10 @@ const DEFAULTS = {
   sessionLimitTokens: 500000,
   weeklyLimitTokens: 2500000,
   sessionWindowHours: 5,
-  weeklyWindowDays: 7,
+  // Weekly reset: fixed day/time schedule (matches claude.ai → Settings → Usage)
+  weeklyResetDay: 0,     // 0 = Sunday
+  weeklyResetHour: 13,   // 1:00 PM
+  weeklyResetMinute: 0,
   pricing: {
     'claude-opus-4-6':           { input: 15.00, cacheRead: 1.50, cacheWrite: 18.75, output: 75.00 },
     'claude-sonnet-4-6':         { input:  3.00, cacheRead: 0.30, cacheWrite:  3.75, output: 15.00 },
@@ -44,7 +47,7 @@ function loadConfig() {
   }
 }
 
-// ── JSONL Reader (for 5h / 7d / monthly — not provided by Claude Code) ────────
+// ── JSONL Reader ──────────────────────────────────────────────────────────────
 
 function parseJSONLFile(filePath) {
   const entries = [];
@@ -128,10 +131,74 @@ function usageColor(p) {
 function c(color, text) { return `${color}${text}${C.reset}`; }
 
 // ── Timezone ──────────────────────────────────────────────────────────────────
-// Detect once at startup and use explicitly everywhere — ensures correct
-// output even during DST transitions or when TZ env var is not set in the
-// Claude Code subprocess environment.
+// Detect system timezone once at startup. Used explicitly in all date/time
+// formatting and arithmetic so output is correct regardless of how the
+// Claude Code subprocess inherits (or doesn't inherit) the TZ env var.
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// ── Timezone-aware date helpers ───────────────────────────────────────────────
+
+// Return the local date/time components of `date` in `tz`.
+function localParts(date, tz) {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: 'numeric',
+      weekday: 'short', hour12: false,
+    }).formatToParts(date)
+      .filter(x => x.type !== 'literal')
+      .map(x => [x.type, x.value])
+  );
+  const DOW = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 };
+  return {
+    year:    +p.year,
+    month:   +p.month - 1,   // 0-indexed
+    day:     +p.day,
+    hour:    +p.hour % 24,   // Intl can return 24 for midnight
+    minute:  +p.minute,
+    dow:     DOW[p.weekday] ?? 0,
+  };
+}
+
+// Convert local date/time components in `tz` to a UTC Date.
+// Uses iterative correction to handle DST transitions correctly.
+function localToUTC(year, month0, day, hour, minute, tz) {
+  let guess = new Date(Date.UTC(year, month0, day, hour, minute));
+  for (let i = 0; i < 4; i++) {
+    const lp = localParts(guess, tz);
+    const gotMs  = Date.UTC(lp.year, lp.month, lp.day, lp.hour, lp.minute);
+    const wantMs = Date.UTC(year, month0, day, hour, minute);
+    if (Math.abs(gotMs - wantMs) < 60_000) break;
+    guess = new Date(guess.getTime() + (wantMs - gotMs));
+  }
+  return guess;
+}
+
+// Find the most recent past occurrence of (resetDow at resetHour:resetMinute)
+// in the user's timezone. This is the start of the current weekly window.
+function getLastWeeklyReset(now, tz, resetDow, resetHour, resetMinute) {
+  // Walk back day by day (max 8). Anchor each probe at noon UTC to avoid
+  // DST edge cases when crossing day boundaries.
+  for (let i = 0; i <= 7; i++) {
+    const probe = new Date(Date.UTC(
+      now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i, 12, 0
+    ));
+    const lp = localParts(probe, tz);
+    if (lp.dow !== resetDow) continue;
+
+    const candidate = localToUTC(lp.year, lp.month, lp.day, resetHour, resetMinute, tz);
+    if (candidate <= now) return candidate;
+    // Reset time on this day is still in the future — go back one more week
+    return localToUTC(lp.year, lp.month, lp.day - 7, resetHour, resetMinute, tz);
+  }
+  return new Date(now.getTime() - 7 * 86_400_000); // fallback
+}
+
+function getNextWeeklyReset(now, tz, resetDow, resetHour, resetMinute) {
+  const last = getLastWeeklyReset(now, tz, resetDow, resetHour, resetMinute);
+  return new Date(last.getTime() + 7 * 86_400_000);
+}
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -144,15 +211,20 @@ function fmtTime(date) {
   }).format(date).toLowerCase();
 }
 
-function fmtDate(date) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: TZ,
-    month: 'short',
-    day: 'numeric',
-  }).formatToParts(date);
-  const month = parts.find(p => p.type === 'month').value.toLowerCase();
-  const day   = parts.find(p => p.type === 'day').value;
-  return `${month} ${day}`;
+// Countdown from now to a future date: "in 4h 18m" — mirrors Claude's UI
+function fmtCountdown(future, now) {
+  const ms = future - now;
+  if (ms <= 0) return 'resetting';
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  if (h > 0) return `in ${h}h ${m}m`;
+  return `in ${m}m`;
+}
+
+// Day-name + time: "sun 1:00pm" — mirrors Claude's weekly reset display
+const DOW_SHORT = ['sun','mon','tue','wed','thu','fri','sat'];
+function fmtWeeklyReset(resetDow, nextReset) {
+  return `${DOW_SHORT[resetDow]} ${fmtTime(nextReset)}`;
 }
 
 function fmtTokens(n) {
@@ -169,41 +241,45 @@ function main(claudeData) {
     return;
   }
 
-  const cfg      = loadConfig();
+  const cfg = loadConfig();
 
   // Disabled by user preference — output nothing
   if (cfg.disabled) return;
-  const claudeDir = path.join(os.homedir(), '.claude');
-  const now      = new Date();
 
-  // ── From Claude Code stdin (accurate, no calculation needed) ──────────────
-  const modelName      = claudeData?.model?.display_name || 'Claude';
-  const ctxUsedPct     = Math.floor(claudeData?.context_window?.used_percentage || 0);
-  const ctxTotal       = claudeData?.context_window?.context_window_size || 200_000;
-  const ctxUsed        = claudeData?.context_window?.total_input_tokens || 0;
-  const sessionCostUSD = claudeData?.cost?.total_cost_usd || 0;
+  const claudeDir = path.join(os.homedir(), '.claude');
+  const now       = new Date();
+
+  // ── From Claude Code stdin ─────────────────────────────────────────────────
+  const modelName        = claudeData?.model?.display_name || 'Claude';
+  const ctxUsedPct       = Math.floor(claudeData?.context_window?.used_percentage || 0);
+  const ctxTotal         = claudeData?.context_window?.context_window_size || 200_000;
+  const ctxUsed          = claudeData?.context_window?.total_input_tokens || 0;
+  const sessionCostUSD   = claudeData?.cost?.total_cost_usd || 0;
   const sessionCostLocal = sessionCostUSD * cfg.usdToLocalRate;
 
-  // ── From JSONL: 5h / 7d / monthly (not provided by Claude Code) ───────────
+  // ── From JSONL ────────────────────────────────────────────────────────────
   const allEntries = collectAllEntries(claudeDir);
 
-  // 5h rolling window
-  const fiveHrAgo = new Date(now - cfg.sessionWindowHours * 3_600_000);
-  const win5h     = allEntries.filter(e => e.timestamp >= fiveHrAgo);
-  const tokens5h  = win5h.reduce((s, e) => s + totalTokens(e.usage), 0);
-  const pct5h     = pct(tokens5h, cfg.sessionLimitTokens);
-  const reset5h   = win5h.length > 0
+  // 5h session: rolling window from oldest message in last 5 hours.
+  // Reset = when that oldest message falls out of the window (oldest + 5h).
+  // Displayed as a countdown to mirror Claude's "Resets in X hr Y min".
+  const fiveHrAgo  = new Date(now - cfg.sessionWindowHours * 3_600_000);
+  const win5h      = allEntries.filter(e => e.timestamp >= fiveHrAgo);
+  const tokens5h   = win5h.reduce((s, e) => s + totalTokens(e.usage), 0);
+  const pct5h      = pct(tokens5h, cfg.sessionLimitTokens);
+  const reset5h    = win5h.length > 0
     ? new Date(win5h[0].timestamp.getTime() + cfg.sessionWindowHours * 3_600_000)
     : null;
 
-  // 7d rolling window
-  const sevenDayAgo = new Date(now - cfg.weeklyWindowDays * 86_400_000);
-  const win7d       = allEntries.filter(e => e.timestamp >= sevenDayAgo);
-  const tokens7d    = win7d.reduce((s, e) => s + totalTokens(e.usage), 0);
-  const pct7d       = pct(tokens7d, cfg.weeklyLimitTokens);
-  const reset7d     = win7d.length > 0
-    ? new Date(win7d[0].timestamp.getTime() + cfg.weeklyWindowDays * 86_400_000)
-    : null;
+  // Weekly: fixed day/time schedule — NOT a rolling window.
+  // Matches claude.ai → Settings → Usage "Resets Sun 1:00 PM" format.
+  const lastWeeklyReset = getLastWeeklyReset(
+    now, TZ, cfg.weeklyResetDay, cfg.weeklyResetHour, cfg.weeklyResetMinute
+  );
+  const nextWeeklyReset = new Date(lastWeeklyReset.getTime() + 7 * 86_400_000);
+  const winWeekly       = allEntries.filter(e => e.timestamp >= lastWeeklyReset);
+  const tokensWeekly    = winWeekly.reduce((s, e) => s + totalTokens(e.usage), 0);
+  const pctWeekly       = pct(tokensWeekly, cfg.weeklyLimitTokens);
 
   // Monthly spend
   const monthStart     = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -219,19 +295,24 @@ function main(claudeData) {
 
   const ctxStr  = `ctx ${c(usageColor(ctxUsedPct), `${fmtTokens(ctxUsed)}/${fmtTokens(ctxTotal)}`)} ${c(C.dim, `(${ctxUsedPct}%)`)}`;
   const costStr = `cost ${c(C.white, `${sym}${sessionCostLocal.toFixed(2)}`)}`;
-  const str5h   = `5h ${c(usageColor(pct5h), `${pct5h}%`)}` + (reset5h ? c(C.dim, ` @${fmtTime(reset5h)}`) : '');
-  const str7d   = `7d ${c(usageColor(pct7d), `${pct7d}%`)}` + (reset7d ? c(C.dim, ` @${fmtDate(reset7d)}, ${fmtTime(reset7d)}`) : '');
+
+  // Session: "5h 17% in 4h 18m" — countdown matches Claude's UI
+  const str5h = `5h ${c(usageColor(pct5h), `${pct5h}%`)}` +
+    (reset5h ? c(C.dim, ` ${fmtCountdown(reset5h, now)}`) : '');
+
+  // Weekly: "7d 3% sun 1:00pm" — fixed schedule matches Claude's UI
+  const str7d = `7d ${c(usageColor(pctWeekly), `${pctWeekly}%`)}` +
+    c(C.dim, ` ${fmtWeeklyReset(cfg.weeklyResetDay, nextWeeklyReset)}`);
 
   const overCap  = spendLocal > capLocal;
   const extraStr = `extra ${c(overCap ? C.red : C.yellow, `${sym}${spendLocal.toFixed(2)}/${sym}${capLocal.toFixed(2)}`)} ${c(overCap ? C.red : C.green, `(${sym}${leftLocal.toFixed(2)} left)`)}`;
 
-  // Two lines — each shorter so content survives narrow terminals
   const line1 = [c(C.cyan, modelName), ctxStr, costStr].join(sep);
   const line2 = [str5h, str7d, extraStr].join(sep);
   process.stdout.write(line1 + '\n' + line2 + '\n');
 }
 
-// Claude Code sends JSON data via stdin — read it then run
+// Claude Code sends JSON data via stdin
 let input = '';
 process.stdin.on('data', chunk => input += chunk);
 process.stdin.on('end', () => {
