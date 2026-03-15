@@ -232,9 +232,13 @@ async function main() {
     ? (existing.monthlyCapUSD * rate).toFixed(0)
     : plan.monthlyCapUSD ? (plan.monthlyCapUSD * rate).toFixed(0) : null;
 
+  console.log(`  ${dim("If you're on a Team plan or don't know your cap, type \"skip\" to just track spend.")}\n`);
   const capRaw   = await ask(rl, `  ${cyan('?')} Monthly cap in ${sym}${defCapLocal ? dim(` [${sym}${defCapLocal}]`) : ''}: `);
-  const capLocal = parseFloat(capRaw) || (defCapLocal ? parseFloat(defCapLocal) : 0);
+  const skipCap  = !capRaw || ['skip','no','?','unknown','idk'].includes(capRaw.toLowerCase());
+  const capLocal = skipCap ? 0 : (parseFloat(capRaw) || (defCapLocal ? parseFloat(defCapLocal) : 0));
   const capUSD   = capLocal / rate;
+  if (skipCap) console.log(`  ${green('✓')} No cap set — will show monthly spend only\n`);
+  else console.log('');
   console.log('');
 
   // ── Step 4 — Calibrate from Claude's UI ───────────────────────────────────

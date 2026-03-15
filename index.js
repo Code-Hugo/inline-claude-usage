@@ -311,8 +311,11 @@ function main(claudeData) {
   const str7d = `7d ${c(usageColor(pctWeekly), `${pctWeekly}%`)}` +
     c(C.dim, ` ${fmtWeeklyReset(cfg.weeklyResetDay, nextWeeklyReset)}`);
 
-  const overCap  = spendLocal > capLocal;
-  const extraStr = `extra ${c(overCap ? C.red : C.yellow, `${sym}${spendLocal.toFixed(2)}/${sym}${capLocal.toFixed(2)}`)} ${c(overCap ? C.red : C.green, `(${sym}${leftLocal.toFixed(2)} left)`)}`;
+  const noCap    = !cfg.monthlyCapUSD;
+  const overCap  = !noCap && spendLocal > capLocal;
+  const extraStr = noCap
+    ? `spent ${c(C.white, `${sym}${spendLocal.toFixed(2)}`)} ${c(C.dim, 'this month')}`
+    : `extra ${c(overCap ? C.red : C.yellow, `${sym}${spendLocal.toFixed(2)}/${sym}${capLocal.toFixed(2)}`)} ${c(overCap ? C.red : C.green, `(${sym}${leftLocal.toFixed(2)} left)`)}`;
 
   const line1 = [c(C.cyan, modelName), ctxStr, costStr].join(sep);
   const line2 = [str5h, str7d, extraStr].join(sep);

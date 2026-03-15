@@ -3,24 +3,24 @@
 Real-time Claude usage in your Claude Code terminal status line.
 
 ```
-Sonnet 4.6 | ctx 18k/200k (9%) | cost €0.09
-5h 17% @1:00pm | 7d 31% @mar 13, 12:00pm | extra €17.43/€20.00 (€2.57 left)
+Claude Sonnet 4.6 | ctx 18k/200k (9%) | cost €0.09
+5h 17% in 4h 18m | 7d 31% sun 1:00pm | spent €17.43 this month
 ```
 
-Two lines, always visible — even on narrow terminals.
+Two lines, always visible — even on narrow terminals. Colors shift green → yellow → red as you approach your limits.
 
-**What it shows:**
+---
+
+## What it shows
 
 | Field | Description |
 |---|---|
 | Model | Which Claude model is active |
-| ctx | Context window tokens used vs total, with % |
+| ctx | Context window tokens used, total, and % |
 | cost | Cost of the current session |
-| 5h | Rolling 5-hour usage % and when it resets |
-| 7d | Rolling 7-day usage % and when it resets |
-| extra | Monthly spend vs your configured cap |
-
-Colors update with your usage level — green → yellow → red.
+| 5h | Your 5-hour session usage % and time until it resets |
+| 7d | Your weekly usage % and when the weekly reset is |
+| spent / extra | Monthly spend — with or without a cap |
 
 All data is read locally from `~/.claude/` — no extra API calls, no telemetry.
 
@@ -42,13 +42,13 @@ chmod +x install.sh setup.js index.js
 ./install.sh
 ```
 
-`install.sh` checks for Node.js and then launches the interactive **setup wizard** automatically.
+`install.sh` checks for Node.js and then launches the interactive setup wizard automatically.
 
 ---
 
 ## Setup wizard
 
-The wizard runs automatically on first install. It walks you through five steps:
+The wizard runs automatically on first install. It walks you through five steps.
 
 ### Step 1 — Plan
 
@@ -62,32 +62,83 @@ Choose your Claude plan:
   ○ 5. Claude API (pay-as-you-go)
 ```
 
-- **Pro / Max** — sensible token limit defaults are pre-filled. You can accept them or calibrate (see below).
-- **Team** — token limits vary by contract so calibration is required (takes ~30 seconds).
-- **API** — no session/weekly limits, only monthly spend cap is tracked.
+- **Pro / Max** — sensible token limit defaults are pre-filled. You can accept them or calibrate from live usage.
+- **Team** — limits vary by contract, so you'll calibrate from your current usage in Claude's settings (takes ~30 seconds).
+- **API** — no session/weekly limits; only monthly spend is tracked.
+
+**Example input:** `4` *(for Team)*
+
+---
 
 ### Step 2 — Currency
 
-Enter your currency symbol (`€`, `$`, `£`, etc.) and the USD conversion rate.
+```
+? Currency symbol  [€]:
+? USD → € rate     [0.92]:
+```
 
-```
-? Currency symbol     [€]:
-? USD → € rate        [0.92]:
-```
+Enter your currency symbol and the USD conversion rate. The defaults shown are from your last run.
+
+**Example inputs:**
+- Symbol: `€` *(or `$`, `£`, `¥`, etc. — press Enter to keep the default)*
+- Rate: `0.92` *(press Enter to keep default, or type a current rate like `1.08`)*
+
+If you use USD, enter `$` and `1`.
+
+---
 
 ### Step 3 — Monthly spend cap
 
-Enter your monthly budget in your chosen currency. This is used to show how much of your cap you've spent and how much is left.
+```
+? Monthly cap in €  [skip]:
+```
 
-```
-? Monthly cap in €  [€18]:
-```
+This sets an optional budget. If you hit it, the spend line turns red.
+
+**On Team plan:** billing goes to your organisation, so you may not have a personal cap — just type `skip` (or press Enter) and the tool will show your monthly spend without a limit.
+
+**Example inputs:**
+- `skip` — just track spend with no limit
+- `20` — set a €20/month cap
+- `100` — set a €100/month cap
+
+---
 
 ### Step 4 — Usage limits (calibration)
 
-This is how the 5h and 7d percentages are calculated.
+This is what makes the 5h and 7d percentages accurate. You'll need Claude's settings page open.
 
-**For Pro / Max users**, preset defaults are shown and calibration is optional:
+**Open:** `claude.ai → Settings → Usage`
+
+You'll see something like:
+
+```
+Usage limits
+5-hour session      Resets in 4 hr 18 min     32%  ████░░░
+This week           Resets Sun 1:00 PM          5%  █░░░░░░
+```
+
+The wizard asks you four things from that screen:
+
+```
+? Your current 5-hour session usage %  [0 to enter tokens manually]:
+→ Type: 32
+
+? Session resets in (e.g. "4h 18m", "45m", "6:03 PM"):
+→ Type: 4h 18m
+
+? Your current 7-day weekly usage %  [0 to enter tokens manually]:
+→ Type: 5
+
+? Weekly resets on (e.g. "Sun 1:00 PM", "Mon 9:00 AM"):
+→ Type: Sun 1:00 PM
+```
+
+The tool back-calculates your token limits from what you enter here, so the percentages stay accurate going forward.
+
+> **If you have no recent usage:** Type `0` at any percentage prompt to enter your token limit manually instead. Your team admin may know the contract limits.
+
+**For Pro / Max users:** preset defaults are shown and calibration is optional:
 
 ```
   Preset defaults for Claude Pro:
@@ -97,25 +148,9 @@ This is how the 5h and 7d percentages are calculated.
 ? Calibrate from live usage? [y/N]:
 ```
 
-**For Team users**, calibration is required since limits aren't fixed:
+Press Enter to accept the defaults, or `y` to calibrate from Claude's settings.
 
-```
-  Tokens detected in your local history:
-    Last 5h : 45,231 tokens
-    Last 7d : 187,432 tokens
-
-  Open claude.ai → Settings → Usage, then enter the percentages shown.
-
-? Your current 5-hour session usage % (0 to enter manually): 30
-  ✓ 5h session limit estimated: 150,770 tokens
-
-? Your current 7-day weekly usage %   (0 to enter manually): 15
-  ✓ 7d weekly limit estimated: 1,249,547 tokens
-```
-
-**How calibration works:** You look up your current usage % in Claude's settings, enter it here, and the tool back-calculates your actual token limit from your local usage data. It then uses that limit to compute percentages going forward.
-
-> If you have no recent usage data, you can enter your limits manually in tokens instead.
+---
 
 ### Step 5 — Display
 
@@ -123,13 +158,13 @@ This is how the 5h and 7d percentages are calculated.
 ? Disable status line? [n]:
 ```
 
-Enter `y` to stop the status line from showing without removing it from Claude Code's settings. Re-run setup to re-enable it.
+Press Enter to keep the status line active. Type `y` to hide it without removing it from Claude Code's settings — useful if you want to pause it temporarily.
 
 ---
 
 ## Reconfiguring
 
-Run setup again at any time — for example if your usage pattern changes and the percentages feel off, or you switch plans:
+Run setup again at any time — for example after switching plans, or if the percentages feel off:
 
 ```bash
 node /path/to/inline-claude-usage/setup.js --reconfigure
@@ -144,13 +179,17 @@ Your existing values are shown as defaults so you only need to change what's dif
 When Claude Code refreshes its status bar, it runs `index.js` and displays the output.
 
 - **Model, context window, session cost** — received directly from Claude Code via stdin (accurate and always current)
-- **5h / 7d rolling windows** — calculated by reading `~/.claude/projects/**/*.jsonl`, the local conversation logs Claude Code writes automatically
+- **5h / 7d usage** — calculated from `~/.claude/projects/**/*.jsonl`, the local conversation logs Claude Code writes automatically
 - **Monthly spend** — aggregated from the same JSONL files using published Anthropic pricing
 - **Config** — stored at `~/.claude/inline-claude-usage.json`
 
-### First run behaviour
+### Session reset accuracy
 
-If no config file is found, the status line shows a setup prompt instead of usage data:
+Right after you run `--reconfigure`, the session countdown is anchored to the exact time you entered, so it matches Claude's UI perfectly. Once your session resets naturally, the tool smoothly switches to estimating the next reset from your JSONL history. It stays accurate without needing another reconfigure.
+
+### First run
+
+If no config file is found, the status line shows a setup prompt:
 
 ```
 ⚙ inline-claude-usage not configured — run: node /path/to/setup.js
@@ -158,14 +197,50 @@ If no config file is found, the status line shows a setup prompt instead of usag
 
 Run the command shown, complete the wizard, then restart Claude Code.
 
-### Disabling
+---
 
-To stop the status line from showing without uninstalling, either:
+## Disabling / removing
 
-- Re-run setup and answer `y` at Step 5, **or**
-- Set `"disabled": true` in `~/.claude/inline-claude-usage.json`
+To **pause** the status line without uninstalling: re-run setup and answer `y` at Step 5, or set `"disabled": true` in `~/.claude/inline-claude-usage.json`.
 
-To remove it entirely, delete the `statusLine` entry from `~/.claude/settings.json`.
+To **remove it entirely**: delete the `statusLine` entry from `~/.claude/settings.json`.
+
+---
+
+## Troubleshooting
+
+**The 5h or 7d % shows 100% or looks wrong**
+
+Your token limits are probably off. Re-run setup and calibrate from your current % in Claude's settings:
+
+```bash
+node /path/to/inline-claude-usage/setup.js --reconfigure
+```
+
+**The session countdown doesn't match Claude's UI**
+
+Re-run `--reconfigure` while Claude's settings page is open, and enter the values shown there (Step 4). The countdown will sync immediately.
+
+**I'm on Team plan and have no recent usage to calibrate from**
+
+Use Claude for a few minutes first, then re-run setup. Alternatively, type `0` at the % prompts to enter token limits manually — your team admin may know the contract limits.
+
+**The cost shown doesn't match Claude's billing exactly**
+
+Cost is estimated from local token counts using published Anthropic pricing. Minor differences are normal. For exact billing, check `claude.ai → Settings → Billing`. On Team plan, billing goes to your organisation.
+
+**Nothing appears in the status line**
+
+Make sure Claude Code's settings have the `statusLine` entry. The installer adds it automatically, but you can check `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "node /path/to/inline-claude-usage/index.js"
+  }
+}
+```
 
 ---
 
@@ -175,36 +250,18 @@ Located at `~/.claude/inline-claude-usage.json` after setup.
 
 | Key | Type | Description |
 |---|---|---|
-| `plan` | string | Your plan key: `pro`, `max100`, `max200`, `team`, `api` |
+| `plan` | string | Your plan: `pro`, `max100`, `max200`, `team`, `api` |
 | `currencySymbol` | string | Symbol shown in output, e.g. `€` |
-| `usdToLocalRate` | number | USD to your currency conversion rate |
-| `monthlyCapUSD` | number | Your monthly spend cap converted to USD |
-| `sessionLimitTokens` | number | Token limit for the 5h rolling window |
-| `weeklyLimitTokens` | number | Token limit for the 7d rolling window |
+| `usdToLocalRate` | number | USD to local currency conversion rate |
+| `monthlyCapUSD` | number | Monthly spend cap in USD (0 = no cap, show spend only) |
+| `sessionLimitTokens` | number | Token limit for the 5h window |
+| `weeklyLimitTokens` | number | Token limit for the 7d window |
 | `sessionWindowHours` | number | Session window size in hours (default: 5) |
-| `weeklyWindowDays` | number | Weekly window size in days (default: 7) |
-| `disabled` | boolean | Set to `true` to hide the status line |
+| `weeklyResetDay` | number | Day of week for weekly reset (0 = Sunday) |
+| `weeklyResetHour` | number | Hour of weekly reset in local time |
+| `weeklyResetMinute` | number | Minute of weekly reset |
+| `disabled` | boolean | Set `true` to hide the status line |
 | `pricing` | object | Per-model pricing in USD per million tokens |
-
----
-
-## FAQ
-
-**The 5h / 7d percentages are showing 100% — why?**
-
-Your configured token limits are probably lower than your actual usage. Re-run setup and calibrate from your current usage % in Claude's settings.
-
-**I'm on Team plan and don't have any recent usage data for calibration.**
-
-Use Claude for a bit first, then run `node setup.js --reconfigure`. Alternatively, enter your limits manually in tokens — your team admin may be able to tell you the contract limits.
-
-**The cost shown doesn't match Claude's billing exactly.**
-
-Cost is estimated from local token counts using published Anthropic pricing. Minor differences are normal. For exact billing, check claude.ai.
-
-**Can I use USD instead of EUR?**
-
-Yes — in setup, enter `$` as your symbol and `1` as the conversion rate.
 
 ---
 
