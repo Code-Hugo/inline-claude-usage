@@ -147,6 +147,18 @@ function parseWeeklyReset(input) {
   return { day, hour, minute };
 }
 
+// ── Currency presets ──────────────────────────────────────────────────────────
+
+const CURRENCIES = [
+  { symbol: '€', code: 'EUR', rate: 0.92  },
+  { symbol: '$', code: 'USD', rate: 1.00  },
+  { symbol: '£', code: 'GBP', rate: 0.79  },
+  { symbol: '¥', code: 'JPY', rate: 149.5 },
+  { symbol: 'Fr', code: 'CHF', rate: 0.88  },
+  { symbol: 'CA$', code: 'CAD', rate: 1.36  },
+  { symbol: 'AU$', code: 'AUD', rate: 1.53  },
+];
+
 // ── Plan presets ──────────────────────────────────────────────────────────────
 
 const PLANS = [
@@ -233,6 +245,59 @@ async function selectFromList(items, defaultIdx, labelFn) {
   });
 }
 
+// ── Horizontal left/right selector ───────────────────────────────────────────
+// Shows items inline; ← → arrows navigate, Enter confirms.
+
+async function selectHorizontal(items, defaultIdx, labelFn, sublineFn) {
+  const lineCount = sublineFn ? 2 : 1;
+
+  const render = (selected, first) => {
+    if (!first) process.stdout.write(`\x1b[${lineCount}A`);
+    const row = items.map((item, i) => {
+      const lbl = labelFn(item, i);
+      return i === selected ? cyan(`[${lbl}]`) : dim(lbl);
+    }).join('   ');
+    process.stdout.write(`\r\x1b[K    ← ${row} →\n`);
+    if (sublineFn) process.stdout.write(`\r\x1b[K    ${sublineFn(items[selected], selected)}\n`);
+  };
+
+  if (!process.stdin.isTTY) {
+    render(defaultIdx, true);
+    return defaultIdx;
+  }
+
+  render(defaultIdx, true);
+
+  return new Promise(resolve => {
+    let selected = defaultIdx;
+
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+
+    const onKey = (key) => {
+      if (key === '\x1b[D') {                          // left arrow
+        selected = (selected - 1 + items.length) % items.length;
+        render(selected, false);
+      } else if (key === '\x1b[C') {                   // right arrow
+        selected = (selected + 1) % items.length;
+        render(selected, false);
+      } else if (key === '\r' || key === '\n') {        // enter
+        process.stdin.removeListener('data', onKey);
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        resolve(selected);
+      } else if (key === '\x03') {                     // ctrl+c
+        process.stdin.removeListener('data', onKey);
+        process.stdin.setRawMode(false);
+        process.exit(0);
+      }
+    };
+
+    process.stdin.on('data', onKey);
+  });
+}
+
 // ── Token counting ────────────────────────────────────────────────────────────
 // Counts compute-meaningful tokens only (excludes cache_read — same as index.js).
 
@@ -301,32 +366,51 @@ async function main() {
   const plan       = PLANS[planIdx];
   console.log(`  ${green('✓')} ${plan.label}\n`);
 
+  // ── Step 2a — Currency picker (raw mode, before rl) ───────────────────────
+  console.log(bold('  Step 2 — Currency\n'));
+  console.log(`  ${dim('Use ← → to select, Enter to confirm.')}\n`);
+  const defCurrencyIdx = Math.max(0,
+    CURRENCIES.findIndex(c => c.code === existing.currencyCode) ||
+    CURRENCIES.findIndex(c => c.symbol === existing.currencySymbol)
+  );
+  const currencyIdx = await selectHorizontal(
+    CURRENCIES, defCurrencyIdx,
+    c => `${c.symbol} ${c.code}`,
+    c => dim(`Exchange rate: 1 USD = ${c.rate} ${c.code}`)
+  );
+  const currency = CURRENCIES[currencyIdx];
+  console.log(`\n  ${green('✓')} ${currency.symbol} ${currency.code}\n`);
+
+  // ── Step 2b — Rate (text, allows override) ────────────────────────────────
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
-  // ── Step 2 — Currency ─────────────────────────────────────────────────────
-  console.log(bold('  Step 2 — Currency\n'));
-  const defSym  = existing.currencySymbol || '€';
-  const defRate = existing.usdToLocalRate  || 0.92;
-
-  const symRaw  = await ask(rl, `  ${cyan('?')} Currency symbol      ${dim(`[${defSym}]`)}: `);
-  const sym     = symRaw || defSym;
-  const rateRaw = await ask(rl, `  ${cyan('?')} USD → ${sym} rate        ${dim(`[${defRate}]`)}: `);
+  const defRate = existing.usdToLocalRate || currency.rate;
+  const rateRaw = await ask(rl, `  ${cyan('?')} Exchange rate        ${dim(`[1 USD = ${defRate} ${currency.code}]`)}: `);
   const rate    = parseFloat(rateRaw) || defRate;
+  const sym     = currency.symbol;
   console.log('');
 
   // ── Step 3 — Monthly spend cap ────────────────────────────────────────────
   console.log(bold('  Step 3 — Monthly spend cap\n'));
-  const defCapLocal = existing.monthlyCapUSD
-    ? (existing.monthlyCapUSD * rate).toFixed(0)
-    : plan.monthlyCapUSD ? (plan.monthlyCapUSD * rate).toFixed(0) : null;
+  if (plan.key === 'team') {
+    console.log(`  ${dim('On Team plan, billing goes to your organisation.')}`);
+    console.log(`  ${dim("You may not have a personal budget — it's fine to say no.")}\n`);
+  }
+  const knowCapRaw = await ask(rl, `  ${cyan('?')} Do you have a monthly budget for Claude? ${dim('[y/N]')}: `);
+  const knowCap    = knowCapRaw.toLowerCase() === 'y';
 
-  console.log(`  ${dim("If you're on a Team plan or don't know your cap, type \"skip\" to just track spend.")}\n`);
-  const capRaw   = await ask(rl, `  ${cyan('?')} Monthly cap in ${sym}${defCapLocal ? dim(` [${sym}${defCapLocal}]`) : ''}: `);
-  const skipCap  = !capRaw || ['skip','no','?','unknown','idk'].includes(capRaw.toLowerCase());
-  const capLocal = skipCap ? 0 : (parseFloat(capRaw) || (defCapLocal ? parseFloat(defCapLocal) : 0));
-  const capUSD   = capLocal / rate;
-  if (skipCap) console.log(`  ${green('✓')} No cap set — will show monthly spend only\n`);
-  else console.log('');
+  let capUSD = 0;
+  if (knowCap) {
+    const defCapLocal = existing.monthlyCapUSD
+      ? (existing.monthlyCapUSD * rate).toFixed(0)
+      : plan.monthlyCapUSD ? (plan.monthlyCapUSD * rate).toFixed(0) : '';
+    const capRaw  = await ask(rl, `  ${cyan('?')} Monthly budget in ${sym}${defCapLocal ? dim(` [${sym}${defCapLocal}]`) : ''}: `);
+    const capLocal = parseFloat(capRaw) || parseFloat(defCapLocal) || 0;
+    capUSD = capLocal / rate;
+    console.log(`  ${green('✓')} Budget set to ${sym}${capLocal.toFixed(0)}/month\n`);
+  } else {
+    console.log(`  ${green('✓')} No budget — will show monthly spend only\n`);
+  }
   console.log('');
 
   // ── Step 4 — Calibrate from Claude's UI ───────────────────────────────────
@@ -458,10 +542,10 @@ async function main() {
 
   // ── Step 5 — Display ──────────────────────────────────────────────────────
   console.log(bold('  Step 5 — Display\n'));
-  const defDisabled = existing.disabled === true ? 'Y' : 'n';
-  const disableRaw  = await ask(rl, `  ${cyan('?')} Disable status line?  ${dim(`[${defDisabled}]`)}: `);
-  const disabled    = disableRaw === '' ? existing.disabled === true : disableRaw.toLowerCase() === 'y';
-  console.log('');
+  console.log(`  ${dim('Should the usage status line appear in your Claude Code terminal?')}\n`);
+  const showRaw  = await ask(rl, `  ${cyan('?')} Show status line?     ${dim('[Y/n]')}: `);
+  const disabled = showRaw.toLowerCase() === 'n';
+  console.log(`  ${green('✓')} Status line ${disabled ? 'disabled' : 'enabled'}\n`);
 
   rl.close();
 
@@ -469,6 +553,7 @@ async function main() {
   const config = {
     plan: plan.key,
     currencySymbol: sym,
+    currencyCode: currency.code,
     usdToLocalRate: rate,
     monthlyCapUSD: parseFloat(capUSD.toFixed(4)),
     sessionLimitTokens,

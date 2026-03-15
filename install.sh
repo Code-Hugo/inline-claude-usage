@@ -41,7 +41,20 @@ FUNC="$MARKER
 claude() {
   if [ \"\$1\" = \"usage\" ]; then
     shift
-    node \"$SCRIPT_DIR/setup.js\" \"\$@\"
+    case \"\$1\" in
+      --start)
+        node -e \"
+          const fs = require('fs'), p = require('os').homedir() + '/.claude/settings.json';
+          let s = {}; try { s = JSON.parse(fs.readFileSync(p,'utf8')); } catch {}
+          s.statusLine = { type: 'command', command: 'node $SCRIPT_DIR/index.js' };
+          fs.writeFileSync(p, JSON.stringify(s, null, 2) + '\\\n');
+          console.log('✓ Status line enabled — restart Claude Code to see it.');
+        \"
+        ;;
+      *)
+        node \"$SCRIPT_DIR/setup.js\" \"\$@\"
+        ;;
+    esac
   else
     command claude \"\$@\"
   fi
