@@ -23,6 +23,7 @@ Two lines, always visible — even on narrow terminals. Colors shift green → y
 | 5h | Your 5-hour session usage % and time until it resets |
 | 7d | Your weekly usage % and when the weekly reset is |
 | spent / extra | Monthly spend — with or without a cap |
+| ⚠ drift warning | Appears when estimated usage diverges by ≥15% from calibration — prompts you to reconfigure |
 
 All data is read locally from `~/.claude/` — no extra API calls, no telemetry.
 
@@ -80,11 +81,11 @@ Choose your Claude plan:
 ? USD → € rate     [0.92]:
 ```
 
-Enter your currency symbol and the USD conversion rate. The defaults shown are from your last run.
+Enter your currency symbol and the USD conversion rate. The wizard fetches a live rate from [frankfurter.app](https://www.frankfurter.app) and pre-fills it — just press Enter to accept it, or type your own.
 
 **Example inputs:**
 - Symbol: `€` *(or `$`, `£`, `¥`, etc. — press Enter to keep the default)*
-- Rate: `0.92` *(press Enter to keep default, or type a current rate like `1.08`)*
+- Rate: `0.92` *(press Enter to accept the live rate, or override with your own)*
 
 If you use USD, enter `$` and `1`.
 
@@ -211,6 +212,40 @@ When Claude Code refreshes its status bar, it runs `index.js` and displays the o
 - **Monthly spend** — aggregated from the same JSONL files using published Anthropic pricing
 - **Config** — stored at `~/.claude/inline-claude-usage.json`
 
+### How the 5h and 7d percentages are estimated
+
+The tool counts tokens from your local JSONL history and divides by the limit you calibrated during setup. The token limit is back-calculated from the percentage you read off Claude's settings page — so if you told the wizard "I'm at 32% with a session reset in 4h 18m", it works backwards to derive your limit.
+
+**Important: the tool only sees Claude Code activity.** It reads local files that Claude Code writes — it has no visibility into sessions from claude.ai in your browser, the API, or other clients. If you use Claude outside of the CLI, your true usage will be higher than what this tool shows.
+
+For that reason, **we recommend running `--reconfigure` every few days**, or any time the displayed % looks noticeably lower than what Claude's settings page shows:
+
+```bash
+claude usage --reconfigure
+```
+
+This re-anchors the estimate to your current live usage and keeps the percentages accurate.
+
+### Drift notifications
+
+When the tool detects that your estimated usage has crossed a new 15% milestone (e.g. 30%, 45%, 60%…), it shows a warning in the status line:
+
+```
+⚠ ~45% — run: claude usage
+```
+
+Running `claude usage` opens a short prompt with three options:
+
+- **y** — launch the reconfigure wizard immediately to re-anchor your estimate
+- **n** — dismiss the warning for this milestone (it will reappear at the next 15% step)
+- *(press Enter)* — snooze for 30 minutes
+
+This helps catch drift before it becomes significant.
+
+### Compact display
+
+When your context window reaches 80%, Claude Code inserts a "% until auto-compact" notice that reduces the available width. The tool automatically switches to a compact layout — shorter bars, abbreviated time format, monthly spend hidden — so both lines stay fully visible.
+
 ### Session reset accuracy
 
 Right after you run `--reconfigure`, the session countdown is anchored to the exact time you entered, so it matches Claude's UI perfectly. Once your session resets naturally, the tool smoothly switches to estimating the next reset from your JSONL history. It stays accurate without needing another reconfigure.
@@ -290,6 +325,10 @@ Located at `~/.claude/inline-claude-usage.json` after setup.
 | `weeklyResetMinute` | number | Minute of weekly reset |
 | `disabled` | boolean | Set `true` to hide the status line |
 | `pricing` | object | Per-model pricing in USD per million tokens |
+| `lastCalibratedAt` | string | ISO timestamp of last successful calibration |
+| `driftLevel` | number | Highest 15%-milestone reached since last calibration |
+| `driftDismissed` | number | Highest milestone the user has dismissed |
+| `driftSnoozedUntil` | string | ISO timestamp until drift warning is snoozed |
 
 ---
 
