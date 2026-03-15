@@ -135,10 +135,10 @@ function ask(rl, question) {
 }
 
 // ── Token counting ────────────────────────────────────────────────────────────
+// Counts compute-meaningful tokens only (excludes cache_read — same as index.js).
 
-function countTokensInWindow(claudeDir, windowMs) {
+function countTokensSince(claudeDir, cutoff) {
   const projectsDir = path.join(claudeDir, 'projects');
-  const cutoff = new Date(Date.now() - windowMs);
   let total = 0;
   try {
     for (const project of fs.readdirSync(projectsDir)) {
@@ -155,8 +155,7 @@ function countTokensInWindow(claudeDir, windowMs) {
               if (e.type !== 'assistant' || !e.message?.usage || !e.timestamp) continue;
               if (new Date(e.timestamp) < cutoff) continue;
               const u = e.message.usage;
-              total += (u.input_tokens || 0) + (u.cache_read_input_tokens || 0)
-                     + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0);
+              total += (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0);
             } catch {}
           }
         } catch {}
@@ -256,8 +255,28 @@ async function main() {
     console.log(`  ${dim('Open')} ${cyan('claude.ai → Settings → Usage')} ${dim('and enter what you see there.')}`);
     console.log(`  ${dim('Everything in this step comes from that one page. Press Enter to skip any field.\n')}`);
 
-    const tokens5h = countTokensInWindow(claudeDir, 5 * 3_600_000);
-    const tokens7d = countTokensInWindow(claudeDir, 7 * 86_400_000);
+    // Session: rolling 5h window
+    const tokens5h = countTokensSince(claudeDir, new Date(Date.now() - 5 * 3_600_000));
+
+    // Weekly: tokens since the last actual weekly reset (not rolling 7 days).
+    // Use the reset day/time already configured (or defaults) so calibration
+    // matches the same window that index.js will use going forward.
+    const weeklyResetCutoff = (() => {
+      const resetDow = existing.weeklyResetDay ?? 0;
+      const resetHour = existing.weeklyResetHour ?? 13;
+      const resetMinute = existing.weeklyResetMinute ?? 0;
+      const n = new Date();
+      for (let i = 0; i <= 7; i++) {
+        const probe = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() - i, 12, 0));
+        const lp = localParts(probe);
+        if (lp.dow !== resetDow) continue;
+        const candidate = localToUTC(lp.year, lp.month, lp.day, resetHour, resetMinute);
+        if (candidate <= n) return candidate;
+        return localToUTC(lp.year, lp.month, lp.day - 7, resetHour, resetMinute);
+      }
+      return new Date(n.getTime() - 7 * 86_400_000);
+    })();
+    const tokensWeekly = countTokensSince(claudeDir, weeklyResetCutoff);
 
     // ── Session ──────────────────────────────────────────────────────────────
     console.log(`  ${bold('Current session')}`);
@@ -305,11 +324,11 @@ async function main() {
     console.log(`  ${bold('Weekly limits (All models)')}`);
 
     if (plan.calibrate || !plan.weeklyTokens) {
-      if (tokens7d > 0) {
+      if (tokensWeekly > 0) {
         const pctRaw = await ask(rl, `  ${cyan('?')} Usage % shown          ${dim('(e.g. 3)')}: `);
         const p = parseFloat(pctRaw);
         if (p > 0 && p <= 100) {
-          weeklyLimitTokens = Math.round(tokens7d / (p / 100));
+          weeklyLimitTokens = Math.round(tokensWeekly / (p / 100));
           console.log(`  ${green('✓')} Weekly limit estimated: ${dim(weeklyLimitTokens.toLocaleString())} tokens`);
         }
       } else {
@@ -319,8 +338,8 @@ async function main() {
     } else {
       const pctRaw = await ask(rl, `  ${cyan('?')} Usage % shown          ${dim(`(Enter to use preset ${weeklyLimitTokens.toLocaleString()})`)}: `);
       const p = parseFloat(pctRaw);
-      if (p > 0 && p <= 100 && tokens7d > 0) {
-        weeklyLimitTokens = Math.round(tokens7d / (p / 100));
+      if (p > 0 && p <= 100 && tokensWeekly > 0) {
+        weeklyLimitTokens = Math.round(tokensWeekly / (p / 100));
         console.log(`  ${green('✓')} Weekly limit calibrated: ${dim(weeklyLimitTokens.toLocaleString())} tokens`);
       }
     }

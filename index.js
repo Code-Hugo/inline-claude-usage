@@ -98,9 +98,12 @@ function costUSD(usage, model, pricing) {
        + ((usage.output_tokens               || 0) / M) * p.output;
 }
 
+// Count compute-meaningful tokens only.
+// cache_read_input_tokens are excluded — they are ~10x cheaper to serve and
+// Anthropic's usage limits are compute-based, not raw token counts.
+// This matches what the setup wizard calibrates against.
 function totalTokens(usage) {
   return (usage.input_tokens               || 0)
-       + (usage.cache_read_input_tokens     || 0)
        + (usage.cache_creation_input_tokens || 0)
        + (usage.output_tokens               || 0);
 }
