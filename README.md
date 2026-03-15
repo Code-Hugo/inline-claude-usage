@@ -4,7 +4,7 @@ Real-time Claude usage in your Claude Code terminal status line.
 
 ```
 Claude Sonnet 4.6 | ctx 18k/200k (9%) | cost €0.09
-5h 17% in 4h 18m | 7d 31% sun 1:00pm | spent €17.43 this month
+5h ██░░░░░░ ~17% in 4h 18m | 7d ███░░░░░ ~31% sun 1:00pm | spent €17.43 this month
 ```
 
 Two lines, always visible — even on narrow terminals. Colors shift green → yellow → red as you approach your limits.

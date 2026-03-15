@@ -133,6 +133,11 @@ function usageColor(p) {
 
 function c(color, text) { return `${color}${text}${C.reset}`; }
 
+function fmtBar(pct, color, width = 8) {
+  const filled = Math.round(Math.min(pct, 100) / 100 * width);
+  return c(color, '█'.repeat(filled)) + c(C.dim, '░'.repeat(width - filled));
+}
+
 // ── Timezone ──────────────────────────────────────────────────────────────────
 // Detect system timezone once at startup. Used explicitly in all date/time
 // formatting and arithmetic so output is correct regardless of how the
@@ -303,12 +308,14 @@ function main(claudeData) {
   const ctxStr  = `ctx ${c(usageColor(ctxUsedPct), `${fmtTokens(ctxUsed)}/${fmtTokens(ctxTotal)}`)} ${c(C.dim, `(${ctxUsedPct}%)`)}`;
   const costStr = `cost ${c(C.white, `${sym}${sessionCostLocal.toFixed(2)}`)}`;
 
-  // Session: "5h 17% in 4h 18m" — countdown matches Claude's UI
-  const str5h = `5h ${c(usageColor(pct5h), `${pct5h}%`)}` +
+  // Session: "5h ██░░░░░░ ~17% in 4h 18m"
+  const col5h  = usageColor(pct5h);
+  const str5h  = `5h ${fmtBar(pct5h, col5h)} ${c(col5h, `~${pct5h}%`)}` +
     (reset5h ? c(C.dim, ` ${fmtCountdown(reset5h, now)}`) : '');
 
-  // Weekly: "7d 3% sun 1:00pm" — fixed schedule matches Claude's UI
-  const str7d = `7d ${c(usageColor(pctWeekly), `${pctWeekly}%`)}` +
+  // Weekly: "7d ███░░░░░ ~31% sun 1:00pm"
+  const col7d  = usageColor(pctWeekly);
+  const str7d  = `7d ${fmtBar(pctWeekly, col7d)} ${c(col7d, `~${pctWeekly}%`)}` +
     c(C.dim, ` ${fmtWeeklyReset(cfg.weeklyResetDay, nextWeeklyReset)}`);
 
   const noCap    = !cfg.monthlyCapUSD;
