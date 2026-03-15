@@ -261,15 +261,19 @@ function main(claudeData) {
   const allEntries = collectAllEntries(claudeDir);
 
   // 5h session: rolling window from oldest message in last 5 hours.
-  // Reset = when that oldest message falls out of the window (oldest + 5h).
-  // Displayed as a countdown to mirror Claude's "Resets in X hr Y min".
+  // If the user anchored a reset time during setup, use that until it expires —
+  // it's perfectly accurate. Falls back to JSONL estimate after the session resets.
   const fiveHrAgo  = new Date(now - cfg.sessionWindowHours * 3_600_000);
   const win5h      = allEntries.filter(e => e.timestamp >= fiveHrAgo);
   const tokens5h   = win5h.reduce((s, e) => s + totalTokens(e.usage), 0);
   const pct5h      = pct(tokens5h, cfg.sessionLimitTokens);
-  const reset5h    = win5h.length > 0
-    ? new Date(win5h[0].timestamp.getTime() + cfg.sessionWindowHours * 3_600_000)
-    : null;
+
+  const snapshotReset = cfg.sessionSnapshot?.resetAt ? new Date(cfg.sessionSnapshot.resetAt) : null;
+  const reset5h = (snapshotReset && snapshotReset > now)
+    ? snapshotReset
+    : win5h.length > 0
+      ? new Date(win5h[0].timestamp.getTime() + cfg.sessionWindowHours * 3_600_000)
+      : null;
 
   // Weekly: fixed day/time schedule — NOT a rolling window.
   // Matches claude.ai → Settings → Usage "Resets Sun 1:00 PM" format.
