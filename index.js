@@ -127,17 +127,32 @@ function usageColor(p) {
 
 function c(color, text) { return `${color}${text}${C.reset}`; }
 
+// ── Timezone ──────────────────────────────────────────────────────────────────
+// Detect once at startup and use explicitly everywhere — ensures correct
+// output even during DST transitions or when TZ env var is not set in the
+// Claude Code subprocess environment.
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
 // ── Formatters ────────────────────────────────────────────────────────────────
 
 function fmtTime(date) {
-  return date.toLocaleTimeString('en-US', {
-    hour: 'numeric', minute: '2-digit', hour12: true
-  }).toLowerCase();
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(date).toLowerCase();
 }
 
 function fmtDate(date) {
-  const m = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
-  return `${m[date.getMonth()]} ${date.getDate()}`;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ,
+    month: 'short',
+    day: 'numeric',
+  }).formatToParts(date);
+  const month = parts.find(p => p.type === 'month').value.toLowerCase();
+  const day   = parts.find(p => p.type === 'day').value;
+  return `${month} ${day}`;
 }
 
 function fmtTokens(n) {
