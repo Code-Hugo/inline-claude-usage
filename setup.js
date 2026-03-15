@@ -508,6 +508,11 @@ async function main() {
       if (p > 0 && p <= 100 && tokens5h > 0) {
         sessionLimitTokens = Math.round(tokens5h / (p / 100));
         console.log(`  ${green('✓')} Session limit calibrated: ${dim(sessionLimitTokens.toLocaleString())} tokens`);
+      } else if (p > 0 && p <= 100) {
+        // No local history to back-calculate from — confirm or override the preset
+        const manualRaw = await ask(rl, `  ${cyan('?')} Session token limit    ${dim(`[${sessionLimitTokens.toLocaleString()}]`)}: `);
+        sessionLimitTokens = parseInt(manualRaw, 10) || sessionLimitTokens;
+        console.log(`  ${green('✓')} Session limit set: ${dim(sessionLimitTokens.toLocaleString())} tokens`);
       } else if (p === 0) {
         console.log(`  ${green('✓')} Using preset: ${dim(sessionLimitTokens.toLocaleString())} tokens`);
       }
@@ -539,6 +544,11 @@ async function main() {
       if (p > 0 && p <= 100 && tokensWeekly > 0) {
         weeklyLimitTokens = Math.round(tokensWeekly / (p / 100));
         console.log(`  ${green('✓')} Weekly limit calibrated: ${dim(weeklyLimitTokens.toLocaleString())} tokens`);
+      } else if (p > 0 && p <= 100) {
+        // No local history to back-calculate from — confirm or override the preset
+        const manualRaw = await ask(rl, `  ${cyan('?')} Weekly token limit     ${dim(`[${weeklyLimitTokens.toLocaleString()}]`)}: `);
+        weeklyLimitTokens = parseInt(manualRaw, 10) || weeklyLimitTokens;
+        console.log(`  ${green('✓')} Weekly limit set: ${dim(weeklyLimitTokens.toLocaleString())} tokens`);
       } else if (p === 0) {
         console.log(`  ${green('✓')} Using preset: ${dim(weeklyLimitTokens.toLocaleString())} tokens`);
       }
