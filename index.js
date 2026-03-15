@@ -309,6 +309,31 @@ function main(claudeData) {
   const capLocal       = cfg.monthlyCapUSD * cfg.usdToLocalRate;
   const leftLocal      = Math.max(0, capLocal - spendLocal);
 
+  // ── Drift notification ────────────────────────────────────────────────────
+  // Flag when usage crosses a new 15% milestone so setup.js can prompt the user.
+  // Suppressed for 1 hour after a fresh calibration to avoid immediate re-fires.
+  const driftLevel        = cfg.plan !== 'api'
+    ? Math.max(Math.floor(pct5h / 15), Math.floor(pctWeekly / 15))
+    : 0;
+  const driftDismissed    = cfg.driftDismissed || 0;
+  const driftPrevLevel    = cfg.driftLevel || 0;
+  const driftSnoozedUntil = cfg.driftSnoozedUntil ? new Date(cfg.driftSnoozedUntil) : null;
+  const lastCalibrated    = cfg.lastCalibratedAt ? new Date(cfg.lastCalibratedAt) : null;
+  const calibratedRecently = lastCalibrated && (now - lastCalibrated) < 60 * 60_000;
+  const showDrift = driftLevel > 0 && driftLevel > driftDismissed
+    && !(driftSnoozedUntil && driftSnoozedUntil > now)
+    && !calibratedRecently;
+
+  // Persist new milestone level (only when it increases and calibration isn't fresh)
+  if (driftLevel > driftPrevLevel && !calibratedRecently) {
+    try {
+      let raw = {};
+      try { raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); } catch {}
+      raw.driftLevel = driftLevel;
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2) + '\n');
+    } catch {}
+  }
+
   // ── Assemble ──────────────────────────────────────────────────────────────
   const sym = cfg.currencySymbol;
   const sep = c(C.dim, ' | ');
@@ -332,8 +357,14 @@ function main(claudeData) {
     ? `spent ${c(C.white, `${sym}${spendLocal.toFixed(2)}`)} ${c(C.dim, 'this month')}`
     : `extra ${c(overCap ? C.red : C.yellow, `${sym}${spendLocal.toFixed(2)}/${sym}${capLocal.toFixed(2)}`)} ${c(overCap ? C.red : C.green, `(${sym}${leftLocal.toFixed(2)} left)`)}`;
 
+  const driftStr = showDrift
+    ? c(C.yellow, `⚠ ~${driftLevel * 15}% — run: claude usage`)
+    : null;
+
   const line1 = [c(C.cyan, modelName), ctxStr, costStr].join(sep);
-  const line2 = [str5h, str7d, extraStr].join(sep);
+  const line2Parts = [str5h, str7d, extraStr];
+  if (driftStr) line2Parts.push(driftStr);
+  const line2 = line2Parts.join(sep);
   process.stdout.write(line1 + '\n' + line2 + '\n');
 }
 
