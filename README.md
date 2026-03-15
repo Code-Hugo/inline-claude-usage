@@ -169,10 +169,12 @@ Press Enter to keep the status line active. Type `y` to hide it without removing
 Run setup again at any time — for example after switching plans, or if the percentages feel off:
 
 ```bash
-node /path/to/inline-claude-usage/setup.js --reconfigure
+claude usage --reconfigure
 ```
 
 Your existing values are shown as defaults so you only need to change what's different.
+
+> The installer adds a `claude usage` shell function to your `~/.zshrc`. If you're on bash, it's added to `~/.bashrc`. If the command isn't found after install, run `source ~/.zshrc` (or open a new terminal).
 
 ---
 
