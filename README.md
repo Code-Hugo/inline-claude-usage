@@ -37,14 +37,15 @@ All data is read locally from `~/.claude/` — no extra API calls, no telemetry.
 
 ## Install
 
+Paste this into your terminal (or directly into Claude Code's terminal):
+
 ```bash
-git clone https://github.com/Code-Hugo/inline-claude-usage.git
-cd inline-claude-usage
-chmod +x install.sh setup.js index.js
-./install.sh
+git clone https://github.com/Code-Hugo/inline-claude-usage.git ~/inline-claude-usage && ~/inline-claude-usage/install.sh
 ```
 
-`install.sh` checks for Node.js and then launches the interactive setup wizard automatically.
+That's it — the setup wizard launches immediately after cloning. Follow the prompts and you'll be done in under two minutes.
+
+> Want to install somewhere other than `~/inline-claude-usage`? Clone to any folder you like and run `./install.sh` from inside it.
 
 ---
 
