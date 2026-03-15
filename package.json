@@ -1,0 +1,22 @@
+{
+  "name": "inline-claude-usage",
+  "version": "1.0.0",
+  "description": "Real-time Claude usage in your terminal status line — session, weekly, spend, and context window at a glance.",
+  "main": "index.js",
+  "bin": {
+    "inline-claude-usage": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": ["claude", "anthropic", "usage", "statusline", "terminal", "cli"],
+  "author": "Code-Hugo",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Code-Hugo/inline-claude-usage.git"
+  }
+}

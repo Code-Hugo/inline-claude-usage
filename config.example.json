@@ -1,0 +1,15 @@
+{
+  "currency": "EUR",
+  "currencySymbol": "€",
+  "usdToLocalRate": 0.92,
+  "monthlyCapUSD": 21.74,
+  "sessionLimitTokens": 500000,
+  "weeklyLimitTokens": 2500000,
+  "sessionWindowHours": 5,
+  "weeklyWindowDays": 7,
+  "pricing": {
+    "claude-opus-4-6":   { "input": 15.00, "cacheRead": 1.50, "cacheWrite": 18.75, "output": 75.00 },
+    "claude-sonnet-4-6": { "input":  3.00, "cacheRead": 0.30, "cacheWrite":  3.75, "output": 15.00 },
+    "claude-haiku-4-5":  { "input":  0.80, "cacheRead": 0.08, "cacheWrite":  1.00, "output":  4.00 }
+  }
+}
