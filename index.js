@@ -230,6 +230,17 @@ function fmtCountdown(future, now) {
   return '< 1m';
 }
 
+// Compact countdown: "4h18m" or "45m" — used when display space is tight
+function fmtShort(future, now) {
+  const ms = future - now;
+  if (ms <= 0) return 'now';
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  if (h > 0) return `${h}h${m ? m + 'm' : ''}`;
+  if (m > 0) return `${m}m`;
+  return '<1m';
+}
+
 // Day-name + time: "sun 1:00pm" — mirrors Claude's weekly reset display
 const DOW_SHORT = ['sun','mon','tue','wed','thu','fri','sat'];
 function fmtWeeklyReset(resetDow, nextReset, now) {
@@ -263,6 +274,7 @@ function main(claudeData) {
   // ── From Claude Code stdin ─────────────────────────────────────────────────
   const modelName        = claudeData?.model?.display_name || 'Claude';
   const ctxUsedPct       = Math.floor(claudeData?.context_window?.used_percentage || 0);
+  const compact          = ctxUsedPct >= 80;
   const ctxTotal         = claudeData?.context_window?.context_window_size || 200_000;
   const ctxUsed          = claudeData?.context_window?.total_input_tokens || 0;
   const sessionCostUSD   = claudeData?.cost?.total_cost_usd || 0;
@@ -343,13 +355,16 @@ function main(claudeData) {
 
   // Session: "5h ██░░░░░░ ~17% in 4h 18m"
   const col5h  = usageColor(pct5h);
-  const str5h  = `5h ${fmtBar(pct5h, col5h)} ${c(col5h, `~${pct5h}%`)}` +
-    (reset5h ? c(C.dim, ` ${fmtCountdown(reset5h, now)}`) : '');
+  const str5h  = `5h ${fmtBar(pct5h, col5h, compact ? 6 : 8)} ${c(col5h, `~${pct5h}%`)}` +
+    (reset5h ? c(C.dim, ` ${compact ? fmtShort(reset5h, now) : fmtCountdown(reset5h, now)}`) : '');
 
   // Weekly: "7d ███░░░░░ ~31% sun 1:00pm"
   const col7d  = usageColor(pctWeekly);
-  const str7d  = `7d ${fmtBar(pctWeekly, col7d)} ${c(col7d, `~${pctWeekly}%`)}` +
-    c(C.dim, ` ${fmtWeeklyReset(cfg.weeklyResetDay, nextWeeklyReset, now)}`);
+  const weeklyResetFmt = compact
+    ? (nextWeeklyReset - now < 24 * 3_600_000 ? fmtShort(nextWeeklyReset, now) : DOW_SHORT[cfg.weeklyResetDay])
+    : fmtWeeklyReset(cfg.weeklyResetDay, nextWeeklyReset, now);
+  const str7d  = `7d ${fmtBar(pctWeekly, col7d, compact ? 6 : 8)} ${c(col7d, `~${pctWeekly}%`)}` +
+    c(C.dim, ` ${weeklyResetFmt}`);
 
   const noCap    = !cfg.monthlyCapUSD;
   const overCap  = !noCap && spendLocal > capLocal;
@@ -362,8 +377,8 @@ function main(claudeData) {
     : null;
 
   const line1 = [c(C.cyan, modelName), ctxStr, costStr].join(sep);
-  const line2Parts = [str5h, str7d, extraStr];
-  if (driftStr) line2Parts.push(driftStr);
+  const line2Parts = compact ? [str5h, str7d] : [str5h, str7d, extraStr];
+  if (!compact && driftStr) line2Parts.push(driftStr);
   const line2 = line2Parts.join(sep);
   process.stdout.write(line1 + '\n' + line2 + '\n');
 }
