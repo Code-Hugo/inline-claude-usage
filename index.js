@@ -32,6 +32,10 @@ const DEFAULTS = {
   }
 };
 
+function configExists() {
+  try { fs.accessSync(CONFIG_PATH); return true; } catch { return false; }
+}
+
 function loadConfig() {
   try {
     return Object.assign({}, DEFAULTS, JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')));
@@ -143,7 +147,17 @@ function fmtTokens(n) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 function main(claudeData) {
+  // Not configured yet — prompt user to run setup
+  if (!configExists()) {
+    const setupPath = path.join(__dirname, 'setup.js');
+    process.stdout.write(`\x1b[33m⚙ inline-claude-usage not configured\x1b[0m\x1b[2m — run: node ${setupPath}\x1b[0m\n`);
+    return;
+  }
+
   const cfg      = loadConfig();
+
+  // Disabled by user preference — output nothing
+  if (cfg.disabled) return;
   const claudeDir = path.join(os.homedir(), '.claude');
   const now      = new Date();
 
