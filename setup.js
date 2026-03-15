@@ -259,8 +259,29 @@ async function main() {
     console.log(`  ${dim('Open')} ${cyan('claude.ai → Settings → Usage')} ${dim('and enter what you see there.')}`);
     console.log(`  ${dim('Everything in this step comes from that one page. Press Enter to skip any field.\n')}`);
 
-    // Session: rolling 5h window
-    const tokens5h = countTokensSince(claudeDir, new Date(Date.now() - 5 * 3_600_000));
+    // ── Session ──────────────────────────────────────────────────────────────
+    console.log(`  ${bold('Current session')}`);
+
+    // Ask for reset time FIRST so we can count tokens from the actual session
+    // start (not a blind 5h rolling window that may include a prior session).
+    const resetInRaw = await ask(rl, `  ${cyan('?')} Resets in / at        ${dim('(e.g. 4h 18m  or  6:03 PM)')}: `);
+    let sessionStart5h = new Date(Date.now() - 5 * 3_600_000); // fallback
+    if (resetInRaw) {
+      const resetDate = parseSessionReset(resetInRaw);
+      if (resetDate && resetDate > now) {
+        sessionSnapshot = { resetAt: resetDate.toISOString(), capturedAt: now.toISOString() };
+        sessionStart5h  = new Date(resetDate.getTime() - 5 * 3_600_000);
+        const localTime = new Intl.DateTimeFormat('en-US', {
+          timeZone: TZ, hour: 'numeric', minute: '2-digit', hour12: true,
+        }).format(resetDate).toLowerCase();
+        console.log(`  ${green('✓')} Session anchored — resets at ${localTime}`);
+      } else {
+        console.log(`  ${yellow('!')} Could not parse "${resetInRaw}" — will estimate from usage history`);
+      }
+    }
+
+    // Count tokens from actual session start for accurate calibration
+    const tokens5h = countTokensSince(claudeDir, sessionStart5h);
 
     // Weekly: tokens since the last actual weekly reset (not rolling 7 days).
     // Use the reset day/time already configured (or defaults) so calibration
@@ -282,9 +303,6 @@ async function main() {
     })();
     const tokensWeekly = countTokensSince(claudeDir, weeklyResetCutoff);
 
-    // ── Session ──────────────────────────────────────────────────────────────
-    console.log(`  ${bold('Current session')}`);
-
     if (plan.calibrate || !plan.sessionTokens) {
       // Team / unknown: derive limit from % + local token count
       if (tokens5h > 0) {
@@ -305,21 +323,6 @@ async function main() {
       if (p > 0 && p <= 100 && tokens5h > 0) {
         sessionLimitTokens = Math.round(tokens5h / (p / 100));
         console.log(`  ${green('✓')} Session limit calibrated: ${dim(sessionLimitTokens.toLocaleString())} tokens`);
-      }
-    }
-
-    // Session reset time — user reads "Resets in 4h 18m" from Claude's UI
-    const resetInRaw = await ask(rl, `  ${cyan('?')} Resets in / at        ${dim('(e.g. 4h 18m  or  6:03 PM)')}: `);
-    if (resetInRaw) {
-      const resetDate = parseSessionReset(resetInRaw);
-      if (resetDate && resetDate > now) {
-        sessionSnapshot = { resetAt: resetDate.toISOString(), capturedAt: now.toISOString() };
-        const localTime = new Intl.DateTimeFormat('en-US', {
-          timeZone: TZ, hour: 'numeric', minute: '2-digit', hour12: true,
-        }).format(resetDate).toLowerCase();
-        console.log(`  ${green('✓')} Session anchored — resets at ${localTime}`);
-      } else {
-        console.log(`  ${yellow('!')} Could not parse "${resetInRaw}" — will estimate from usage history`);
       }
     }
     console.log('');

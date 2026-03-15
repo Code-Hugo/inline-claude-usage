@@ -268,16 +268,21 @@ function main(claudeData) {
   // ── From JSONL ────────────────────────────────────────────────────────────
   const allEntries = collectAllEntries(claudeDir);
 
-  // 5h session: rolling window from oldest message in last 5 hours.
-  // If the user anchored a reset time during setup, use that until it expires —
-  // it's perfectly accurate. Falls back to JSONL estimate after the session resets.
-  const fiveHrAgo  = new Date(now - cfg.sessionWindowHours * 3_600_000);
-  const win5h      = allEntries.filter(e => e.timestamp >= fiveHrAgo);
-  const tokens5h   = win5h.reduce((s, e) => s + totalTokens(e.usage), 0);
-  const pct5h      = pct(tokens5h, cfg.sessionLimitTokens);
+  // 5h session: when snapshot is active, count only from the known session start
+  // (snapshotReset − 5h) so tokens from a prior session don't inflate the count.
+  // Falls back to a rolling 5h window once the snapshot expires.
+  const snapshotReset  = cfg.sessionSnapshot?.resetAt ? new Date(cfg.sessionSnapshot.resetAt) : null;
+  const snapshotActive = snapshotReset && snapshotReset > now;
 
-  const snapshotReset = cfg.sessionSnapshot?.resetAt ? new Date(cfg.sessionSnapshot.resetAt) : null;
-  const reset5h = (snapshotReset && snapshotReset > now)
+  const sessionStart = snapshotActive
+    ? new Date(snapshotReset.getTime() - cfg.sessionWindowHours * 3_600_000)
+    : new Date(now - cfg.sessionWindowHours * 3_600_000);
+
+  const win5h    = allEntries.filter(e => e.timestamp >= sessionStart);
+  const tokens5h = win5h.reduce((s, e) => s + totalTokens(e.usage), 0);
+  const pct5h    = pct(tokens5h, cfg.sessionLimitTokens);
+
+  const reset5h  = snapshotActive
     ? snapshotReset
     : win5h.length > 0
       ? new Date(win5h[0].timestamp.getTime() + cfg.sessionWindowHours * 3_600_000)
