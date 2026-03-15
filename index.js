@@ -226,12 +226,15 @@ function fmtCountdown(future, now) {
   const h = Math.floor(ms / 3_600_000);
   const m = Math.floor((ms % 3_600_000) / 60_000);
   if (h > 0) return `in ${h}h ${m}m`;
-  return `in ${m}m`;
+  if (m > 0) return `in ${m}m`;
+  return '< 1m';
 }
 
 // Day-name + time: "sun 1:00pm" — mirrors Claude's weekly reset display
 const DOW_SHORT = ['sun','mon','tue','wed','thu','fri','sat'];
-function fmtWeeklyReset(resetDow, nextReset) {
+function fmtWeeklyReset(resetDow, nextReset, now) {
+  const ms = nextReset - now;
+  if (ms > 0 && ms < 24 * 3_600_000) return fmtCountdown(nextReset, now);
   return `${DOW_SHORT[resetDow]} ${fmtTime(nextReset)}`;
 }
 
@@ -321,7 +324,7 @@ function main(claudeData) {
   // Weekly: "7d ███░░░░░ ~31% sun 1:00pm"
   const col7d  = usageColor(pctWeekly);
   const str7d  = `7d ${fmtBar(pctWeekly, col7d)} ${c(col7d, `~${pctWeekly}%`)}` +
-    c(C.dim, ` ${fmtWeeklyReset(cfg.weeklyResetDay, nextWeeklyReset)}`);
+    c(C.dim, ` ${fmtWeeklyReset(cfg.weeklyResetDay, nextWeeklyReset, now)}`);
 
   const noCap    = !cfg.monthlyCapUSD;
   const overCap  = !noCap && spendLocal > capLocal;
