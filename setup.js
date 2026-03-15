@@ -585,14 +585,18 @@ async function main() {
   }
 
   console.log('');
-  console.log(bold(green('  All done!')));
-  if (disabled) {
-    console.log(yellow('  Status line is disabled. Re-run setup to enable it.'));
-  } else {
-    console.log('  Restart Claude Code to see your status line.');
-  }
+  console.log(bold(green('  ✓ You\'re all set!')));
   console.log('');
-  console.log(dim(`  To reconfigure: node ${path.join(__dirname, 'setup.js')} --reconfigure`));
+  if (disabled) {
+    console.log(yellow('  Status line is currently disabled.'));
+    console.log(dim('  Run claude usage --reconfigure and say Y at Step 5 to enable it.'));
+  } else {
+    console.log('  Next time you open Claude Code in your terminal,');
+    console.log(bold('  your usage bar will appear automatically at the bottom of the screen.'));
+    console.log('');
+    console.log(dim('  Already have Claude Code open? Just restart it to see it.'));
+    console.log(dim('  To update your settings anytime: claude usage --reconfigure'));
+  }
   console.log('');
 }
 

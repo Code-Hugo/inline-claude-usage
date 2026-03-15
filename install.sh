@@ -48,7 +48,7 @@ claude() {
           let s = {}; try { s = JSON.parse(fs.readFileSync(p,'utf8')); } catch {}
           s.statusLine = { type: 'command', command: 'node $SCRIPT_DIR/index.js' };
           fs.writeFileSync(p, JSON.stringify(s, null, 2) + '\\\n');
-          console.log('✓ Status line enabled — restart Claude Code to see it.');
+          console.log('✓ All set! Open Claude Code in your terminal and your usage bar will appear automatically.');
         \"
         ;;
       *)
