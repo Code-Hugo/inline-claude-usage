@@ -389,8 +389,48 @@ async function main() {
   let existing = {};
   try { existing = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); } catch {}
 
+  // ── Drift notification check ──────────────────────────────────────────────
+  // index.js flags when usage crosses a 15% milestone. If the flag is set and
+  // the user didn't explicitly ask to reconfigure, show a lightweight prompt.
+  const isExplicitReconfig = process.argv.includes('--reconfigure') || process.argv.includes('--configure');
+  const driftDetected  = existing.driftLevel    || 0;
+  const driftDismissed = existing.driftDismissed || 0;
+
+  if (driftDetected > driftDismissed && !isExplicitReconfig) {
+    const pct = driftDetected * 15;
+    console.log('');
+    console.log(bold(yellow(`  ⚠  Usage has crossed ~${pct}%`)));
+    console.log(dim('  Your local estimate may be drifting from Claude\'s actual count.'));
+    console.log(dim('  Recalibrating takes about 1 minute and keeps percentages accurate.'));
+    console.log('');
+    const rlDrift = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const ans = await new Promise(resolve =>
+      rlDrift.question(
+        `  ${cyan('?')} Recalibrate now?  ${dim('[y / n / later]')}: `,
+        a => { rlDrift.close(); resolve(a.trim().toLowerCase()); }
+      )
+    );
+    console.log('');
+    if (ans === 'n') {
+      existing.driftDismissed = driftDetected;
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(existing, null, 2) + '\n');
+      console.log(`  ${green('✓')} OK — will remind again at ~${pct + 15}%`);
+      console.log('');
+      return;
+    } else if (ans !== 'y') {
+      // 'later', empty, or anything else → snooze for 30 minutes
+      existing.driftSnoozedUntil = new Date(Date.now() + 30 * 60_000).toISOString();
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(existing, null, 2) + '\n');
+      console.log(dim('  OK — will remind again in 30 minutes.'));
+      console.log('');
+      return;
+    }
+    // 'y' → fall through to full wizard
+    console.log(`  ${green('✓')} Let\'s recalibrate.\n`);
+  }
+
   const existingPlan = PLANS.find(p => p.key === existing.plan);
-  const isReconfig   = process.argv.includes('--reconfigure') || process.argv.includes('--configure') || Object.keys(existing).length > 0;
+  const isReconfig   = isExplicitReconfig || Object.keys(existing).length > 0;
   const now = new Date();
 
   // Kick off live rate fetch — runs in background during plan selection to hide latency
@@ -654,6 +694,7 @@ async function main() {
     weeklyResetHour,
     weeklyResetMinute,
     ...(sessionSnapshot ? { sessionSnapshot } : {}),
+    lastCalibratedAt: new Date().toISOString(),
     disabled,
     pricing: {
       'claude-opus-4-6':           { input: 15.00, cacheRead: 1.50, cacheWrite: 18.75, output: 75.00 },
