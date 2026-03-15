@@ -126,14 +126,23 @@ function parseSessionReset(input) {
 }
 
 // ── Parse weekly reset input ──────────────────────────────────────────────────
-// Accepts: "Sun 1:00 PM", "Sunday 13:00", "Mon 9:30 AM", etc.
-// Returns { day, hour, minute } or null.
+// Accepts: "Sun 1:00 PM", "Sunday 13:00", "Mon 9:30 AM", "45m" (minutes until reset today), etc.
+// Returns { day, hour, minute, sameDay? } or null.
 function parseWeeklyReset(input) {
   const DOW_MAP = {
     sun: 0, sunday: 0, mon: 1, monday: 1, tue: 2, tuesday: 2,
     wed: 3, wednesday: 3, thu: 4, thursday: 4, fri: 5, friday: 5, sat: 6, saturday: 6,
   };
   const s = input.trim().toLowerCase();
+
+  // Relative minutes only (e.g. "45m", "30 min") — reset is later today
+  const relM = s.match(/^(\d+)\s*m(?:in(?:utes?)?)?$/);
+  if (relM) {
+    const resetDate = new Date(Date.now() + parseInt(relM[1]) * 60_000);
+    const lp = localParts(resetDate);
+    return { day: lp.dow, hour: lp.hour, minute: lp.minute, sameDay: true };
+  }
+
   const dayMatch = s.match(/^(sun(?:day)?|mon(?:day)?|tue(?:s(?:day)?)?|wed(?:nesday)?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?|sat(?:urday)?)/);
   if (!dayMatch) return null;
   const day = DOW_MAP[dayMatch[1]];
@@ -478,11 +487,15 @@ async function main() {
     if (plan.calibrate || !plan.sessionTokens) {
       // Team / unknown: derive limit from % + local token count
       if (tokens5h > 0) {
-        const pctRaw = await ask(rl, `  ${cyan('?')} Usage % shown          ${dim('(e.g. 17)')}: `);
+        const pctRaw = await ask(rl, `  ${cyan('?')} Usage % shown          ${dim('(e.g. 17, or 0 if none yet)')}: `);
         const p = parseFloat(pctRaw);
         if (p > 0 && p <= 100) {
           sessionLimitTokens = Math.round(tokens5h / (p / 100));
           console.log(`  ${green('✓')} Session limit estimated: ${dim(sessionLimitTokens.toLocaleString())} tokens`);
+        } else if (p === 0) {
+          console.log(`  ${dim('0% usage — entering limit manually')}`);
+          const manualRaw = await ask(rl, `  ${cyan('?')} Session token limit    ${dim('[500000]')}: `);
+          sessionLimitTokens = parseInt(manualRaw, 10) || 500_000;
         }
       } else {
         const manualRaw = await ask(rl, `  ${cyan('?')} Session token limit    ${dim('[500000]')}: `);
@@ -495,6 +508,8 @@ async function main() {
       if (p > 0 && p <= 100 && tokens5h > 0) {
         sessionLimitTokens = Math.round(tokens5h / (p / 100));
         console.log(`  ${green('✓')} Session limit calibrated: ${dim(sessionLimitTokens.toLocaleString())} tokens`);
+      } else if (p === 0) {
+        console.log(`  ${green('✓')} Using preset: ${dim(sessionLimitTokens.toLocaleString())} tokens`);
       }
     }
     console.log('');
@@ -504,11 +519,15 @@ async function main() {
 
     if (plan.calibrate || !plan.weeklyTokens) {
       if (tokensWeekly > 0) {
-        const pctRaw = await ask(rl, `  ${cyan('?')} Usage % shown          ${dim('(e.g. 3)')}: `);
+        const pctRaw = await ask(rl, `  ${cyan('?')} Usage % shown          ${dim('(e.g. 3, or 0 if none yet)')}: `);
         const p = parseFloat(pctRaw);
         if (p > 0 && p <= 100) {
           weeklyLimitTokens = Math.round(tokensWeekly / (p / 100));
           console.log(`  ${green('✓')} Weekly limit estimated: ${dim(weeklyLimitTokens.toLocaleString())} tokens`);
+        } else if (p === 0) {
+          console.log(`  ${dim('0% usage — entering limit manually')}`);
+          const manualRaw = await ask(rl, `  ${cyan('?')} Weekly token limit     ${dim('[2500000]')}: `);
+          weeklyLimitTokens = parseInt(manualRaw, 10) || 2_500_000;
         }
       } else {
         const manualRaw = await ask(rl, `  ${cyan('?')} Weekly token limit     ${dim('[2500000]')}: `);
@@ -520,24 +539,31 @@ async function main() {
       if (p > 0 && p <= 100 && tokensWeekly > 0) {
         weeklyLimitTokens = Math.round(tokensWeekly / (p / 100));
         console.log(`  ${green('✓')} Weekly limit calibrated: ${dim(weeklyLimitTokens.toLocaleString())} tokens`);
+      } else if (p === 0) {
+        console.log(`  ${green('✓')} Using preset: ${dim(weeklyLimitTokens.toLocaleString())} tokens`);
       }
     }
 
     // Weekly reset schedule — user reads "Resets Sun 1:00 PM" from Claude's UI
     const defResetStr = `${DOW_NAMES[weeklyResetDay]} ${weeklyResetHour % 12 || 12}:${String(weeklyResetMinute).padStart(2,'0')} ${weeklyResetHour >= 12 ? 'PM' : 'AM'}`;
-    const weeklyResetRaw = await ask(rl, `  ${cyan('?')} Resets on             ${dim(`(e.g. Sun 1:00 PM) [${defResetStr}]`)}: `);
+    const weeklyResetRaw = await ask(rl, `  ${cyan('?')} Resets on             ${dim(`(e.g. Sun 1:00 PM  or  45m) [${defResetStr}]`)}: `);
+    let weeklyResetSameDay = false;
     if (weeklyResetRaw) {
       const parsed = parseWeeklyReset(weeklyResetRaw);
       if (parsed) {
         weeklyResetDay    = parsed.day;
         weeklyResetHour   = parsed.hour;
         weeklyResetMinute = parsed.minute;
+        weeklyResetSameDay = parsed.sameDay ?? false;
       } else {
         console.log(`  ${yellow('!')} Could not parse "${weeklyResetRaw}" — keeping existing value`);
       }
     }
-    const weeklyLabel = `${DOW_NAMES[weeklyResetDay]} ${weeklyResetHour % 12 || 12}:${String(weeklyResetMinute).padStart(2,'0')} ${weeklyResetHour >= 12 ? 'PM' : 'AM'}`;
-    console.log(`  ${green('✓')} Weekly resets every ${weeklyLabel}\n`);
+    const weeklyTime = `${weeklyResetHour % 12 || 12}:${String(weeklyResetMinute).padStart(2,'0')} ${weeklyResetHour >= 12 ? 'PM' : 'AM'}`;
+    const weeklyLabel = weeklyResetSameDay
+      ? `later today at ${weeklyTime}`
+      : `every ${DOW_NAMES[weeklyResetDay]} ${weeklyTime}`;
+    console.log(`  ${green('✓')} Weekly resets ${weeklyLabel}\n`);
   }
 
   // ── Step 5 — Display ──────────────────────────────────────────────────────
