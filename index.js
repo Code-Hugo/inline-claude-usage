@@ -196,9 +196,10 @@ function main(claudeData) {
   const overCap  = spendLocal > capLocal;
   const extraStr = `extra ${c(overCap ? C.red : C.yellow, `${sym}${spendLocal.toFixed(2)}/${sym}${capLocal.toFixed(2)}`)} ${c(overCap ? C.red : C.green, `(${sym}${leftLocal.toFixed(2)} left)`)}`;
 
-  process.stdout.write(
-    [c(C.cyan, modelName), ctxStr, costStr, str5h, str7d, extraStr].join(sep) + '\n'
-  );
+  // Two lines — each shorter so content survives narrow terminals
+  const line1 = [c(C.cyan, modelName), ctxStr, costStr].join(sep);
+  const line2 = [str5h, str7d, extraStr].join(sep);
+  process.stdout.write(line1 + '\n' + line2 + '\n');
 }
 
 // Claude Code sends JSON data via stdin — read it then run
