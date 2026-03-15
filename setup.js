@@ -46,6 +46,29 @@ function localToUTC(year, month0, day, hour, minute) {
   return guess;
 }
 
+// Return local date/time components for `date` in the user's TZ.
+function localParts(date) {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: TZ,
+      year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: 'numeric',
+      weekday: 'short', hour12: false,
+    }).formatToParts(date)
+      .filter(x => x.type !== 'literal')
+      .map(x => [x.type, x.value])
+  );
+  const DOW = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 };
+  return {
+    year:   +p.year,
+    month:  +p.month - 1,
+    day:    +p.day,
+    hour:   +p.hour % 24,
+    minute: +p.minute,
+    dow:    DOW[p.weekday] ?? 0,
+  };
+}
+
 // Get today's local date components (year, month0, day) in the user's TZ.
 function todayLocal() {
   const p = Object.fromEntries(
@@ -61,7 +84,13 @@ function todayLocal() {
 // Returns a UTC Date or null.
 function parseSessionReset(input) {
   const now = new Date();
-  const s = input.trim().toLowerCase();
+  // Strip natural-language prefixes ("Resets in", "Resets its", "in", etc.)
+  // and connectors ("and") to support copy-paste from Claude's UI.
+  const s = input.trim().toLowerCase()
+    .replace(/^resets?\s+(in|its|at)?\s*/i, '')
+    .replace(/\band\b\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   // Relative: "4h 18m", "4h18m", "2h", "45m", "45min"
   const relH = s.match(/^(\d+)\s*h(?:\s*(\d+)\s*m(?:in)?)?$/);
@@ -134,6 +163,76 @@ function ask(rl, question) {
   return new Promise(resolve => rl.question(question, a => resolve(a.trim())));
 }
 
+// ── Arrow-key list selector ───────────────────────────────────────────────────
+// Renders an interactive list; returns the selected index.
+// Falls back to number input when stdin is not a TTY.
+
+async function selectFromList(items, defaultIdx, labelFn) {
+  const render = (selected) => {
+    items.forEach((item, i) => {
+      const marker = i === selected ? green('●') : dim('○');
+      process.stdout.write(`    ${marker} ${i + 1}. ${labelFn(item)}\n`);
+    });
+    process.stdout.write('\n');
+  };
+
+  // Non-TTY fallback (piped input, tests, etc.)
+  if (!process.stdin.isTTY) {
+    render(defaultIdx);
+    return new Promise(resolve => {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      rl.question(`  ${cyan('?')} Select [1–${items.length}]${dim(` [${defaultIdx + 1}]`)}: `, ans => {
+        rl.close();
+        const idx = parseInt(ans || String(defaultIdx + 1), 10) - 1;
+        resolve(idx >= 0 && idx < items.length ? idx : defaultIdx);
+      });
+    });
+  }
+
+  render(defaultIdx);
+  process.stdout.write(`  ${cyan('?')} Use ↑ ↓ arrows then Enter`);
+
+  return new Promise(resolve => {
+    let selected = defaultIdx;
+
+    const redraw = () => {
+      // Move cursor up past: items + blank line + prompt line
+      process.stdout.write(`\r\x1b[K\x1b[${items.length + 1}A`);
+      render(selected);
+      process.stdout.write(`  ${cyan('?')} Use ↑ ↓ arrows then Enter`);
+    };
+
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+
+    const onKey = (key) => {
+      if (key === '\x1b[A') {                         // up arrow
+        selected = (selected - 1 + items.length) % items.length;
+        redraw();
+      } else if (key === '\x1b[B') {                  // down arrow
+        selected = (selected + 1) % items.length;
+        redraw();
+      } else if (key >= '1' && key <= String(items.length)) { // number shortcut
+        selected = parseInt(key) - 1;
+        redraw();
+      } else if (key === '\r' || key === '\n') {       // enter
+        process.stdin.removeListener('data', onKey);
+        process.stdin.setRawMode(false);
+        process.stdin.pause();
+        process.stdout.write('\n');
+        resolve(selected);
+      } else if (key === '\x03') {                    // ctrl+c
+        process.stdin.removeListener('data', onKey);
+        process.stdin.setRawMode(false);
+        process.exit(0);
+      }
+    };
+
+    process.stdin.on('data', onKey);
+  });
+}
+
 // ── Token counting ────────────────────────────────────────────────────────────
 // Counts compute-meaningful tokens only (excludes cache_read — same as index.js).
 
@@ -195,25 +294,14 @@ async function main() {
     console.log(dim('  Takes about 2 minutes. Have claude.ai open in your browser.\n'));
   }
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-
-  // ── Step 1 — Plan ─────────────────────────────────────────────────────────
+  // ── Step 1 — Plan (arrow-key selector, runs before rl so raw mode works) ──
   console.log(bold('  Step 1 — Your plan\n'));
-  PLANS.forEach((p, i) => {
-    const marker = existingPlan?.key === p.key ? green('●') : dim('○');
-    console.log(`    ${marker} ${i + 1}. ${p.label}`);
-  });
-  console.log('');
-
-  const defPlanIdx = existingPlan ? PLANS.indexOf(existingPlan) + 1 : '';
-  let plan;
-  while (!plan) {
-    const raw = await ask(rl, `  ${cyan('?')} Select plan [1–${PLANS.length}]${defPlanIdx ? dim(` [${defPlanIdx}]`) : ''}: `);
-    const idx = parseInt(raw || defPlanIdx, 10) - 1;
-    if (idx >= 0 && idx < PLANS.length) plan = PLANS[idx];
-    else console.log(yellow(`  Please enter a number between 1 and ${PLANS.length}.`));
-  }
+  const defPlanIdx = existingPlan ? PLANS.indexOf(existingPlan) : 0;
+  const planIdx    = await selectFromList(PLANS, defPlanIdx, p => p.label);
+  const plan       = PLANS[planIdx];
   console.log(`  ${green('✓')} ${plan.label}\n`);
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   // ── Step 2 — Currency ─────────────────────────────────────────────────────
   console.log(bold('  Step 2 — Currency\n'));
