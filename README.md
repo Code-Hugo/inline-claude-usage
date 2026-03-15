@@ -124,22 +124,24 @@ This week           Resets Sun 1:00 PM          5%  █░░░░░░
 The wizard asks you four things from that screen:
 
 ```
-? Your current 5-hour session usage %  [0 to enter tokens manually]:
-→ Type: 32
-
-? Session resets in (e.g. "4h 18m", "45m", "6:03 PM"):
+? Session resets in / at  (e.g. 4h 18m  or  6:03 PM):
 → Type: 4h 18m
 
-? Your current 7-day weekly usage %  [0 to enter tokens manually]:
+? Usage % shown  (e.g. 17, or 0 if none yet):
+→ Type: 32
+
+? Usage % shown  (e.g. 3, or 0 if none yet):
 → Type: 5
 
-? Weekly resets on (e.g. "Sun 1:00 PM", "Mon 9:00 AM"):
+? Weekly resets on  (e.g. Sun 1:00 PM  or  45m):
 → Type: Sun 1:00 PM
 ```
 
 The tool back-calculates your token limits from what you enter here, so the percentages stay accurate going forward.
 
-> **If you have no recent usage:** Type `0` at any percentage prompt to enter your token limit manually instead. Your team admin may know the contract limits.
+> **If you have 0% usage or just started a new session:** Type `0` at any percentage prompt. For Team plan this drops into manual token entry (your team admin may know the contract limits). For Pro/Max it confirms the preset.
+
+> **Weekly reset is imminent?** If the reset is just minutes away, type `45m` (or however many minutes remain) instead of a day name. The wizard will calculate the exact time and confirm "resets later today at …".
 
 **For Pro / Max users:** preset defaults are shown and calibration is optional:
 
@@ -165,6 +167,19 @@ Press Enter to keep the status line active. Type `y` to hide it without removing
 
 ---
 
+## Updating
+
+If you already have the tool installed, just pull the latest changes from inside the cloned folder:
+
+```bash
+cd ~/inline-claude-usage   # or wherever you cloned it
+git pull
+```
+
+That's it. Claude Code runs `index.js` directly from that folder each time the status bar refreshes, so the new version is picked up immediately — no re-install or restart needed.
+
+---
+
 ## Reconfiguring
 
 Run setup again at any time — for example after switching plans, or if the percentages feel off:
@@ -174,6 +189,14 @@ claude usage --reconfigure
 ```
 
 Your existing values are shown as defaults so you only need to change what's different.
+
+To re-enable the status line in Claude Code without re-running the full wizard (e.g. after manually editing `~/.claude/settings.json`):
+
+```bash
+claude usage --start
+```
+
+This just writes the `statusLine` entry into your settings and prints a confirmation. Open (or restart) Claude Code and the bar appears immediately.
 
 > The installer adds a `claude usage` shell function to your `~/.zshrc`. If you're on bash, it's added to `~/.bashrc`. If the command isn't found after install, run `source ~/.zshrc` (or open a new terminal).
 
