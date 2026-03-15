@@ -128,6 +128,28 @@ function pct(used, total) {
   return Math.min(100, Math.round((used / total) * 100));
 }
 
+// ── Colours ───────────────────────────────────────────────────────────────────
+
+const C = {
+  reset:  '\x1b[0m',
+  cyan:   '\x1b[36m',   // model name
+  white:  '\x1b[37m',   // labels / separators
+  green:  '\x1b[32m',   // low usage / healthy
+  yellow: '\x1b[33m',   // medium usage / warning
+  red:    '\x1b[31m',   // high usage / over cap
+  dim:    '\x1b[2m',    // muted text (reset times, denominators)
+};
+
+function usageColor(p) {
+  if (p >= 90) return C.red;
+  if (p >= 60) return C.yellow;
+  return C.green;
+}
+
+function c(color, text) {
+  return `${color}${text}${C.reset}`;
+}
+
 // ── Formatters ────────────────────────────────────────────────────────────────
 
 function fmtTime(date) {
@@ -214,14 +236,20 @@ function main() {
   // ── Assemble output ────────────────────────────────────────────────────────
   const sym  = cfg.currencySymbol;
   const ctxW = 200_000; // all current Claude models have 200k context
+  const ctxPct = pct(ctxTokens, ctxW);
+  const sep  = c(C.dim, ' | ');
 
-  const ctxStr     = `ctx ${fmtTokens(ctxTokens)}/${fmtTokens(ctxW)} (${pct(ctxTokens, ctxW)}%)`;
-  const costStr    = `cost ${sym}${sessionCostLocal.toFixed(2)}`;
-  const str5h      = `5h ${pct5h}%` + (reset5h ? ` @${fmtTime(reset5h)}` : '');
-  const str7d      = `7d ${pct7d}%` + (reset7d ? ` @${fmtDate(reset7d)}, ${fmtTime(reset7d)}` : '');
-  const extraStr   = `extra ${sym}${spendLocal.toFixed(2)}/${sym}${capLocal.toFixed(2)} (${sym}${leftLocal.toFixed(2)} left)`;
+  const ctxStr   = `ctx ${c(usageColor(ctxPct), `${fmtTokens(ctxTokens)}/${fmtTokens(ctxW)}`)} ${c(C.dim, `(${ctxPct}%)`)}`;
+  const costStr  = `cost ${c(C.white, `${sym}${sessionCostLocal.toFixed(2)}`)}`;
+  const str5h    = `5h ${c(usageColor(pct5h), `${pct5h}%`)}` + (reset5h ? c(C.dim, ` @${fmtTime(reset5h)}`) : '');
+  const str7d    = `7d ${c(usageColor(pct7d), `${pct7d}%`)}` + (reset7d ? c(C.dim, ` @${fmtDate(reset7d)}, ${fmtTime(reset7d)}`) : '');
 
-  const line = [fmtModel(currentModel), ctxStr, costStr, str5h, str7d, extraStr].join(' | ');
+  const overCap    = spendLocal > capLocal;
+  const extraColor = overCap ? C.red : C.yellow;
+  const leftColor  = overCap ? C.red : C.green;
+  const extraStr   = `extra ${c(extraColor, `${sym}${spendLocal.toFixed(2)}/${sym}${capLocal.toFixed(2)}`)} ${c(leftColor, `(${sym}${leftLocal.toFixed(2)} left)`)}`;
+
+  const line = [c(C.cyan, fmtModel(currentModel)), ctxStr, costStr, str5h, str7d, extraStr].join(sep);
   process.stdout.write(line + '\n');
 }
 
