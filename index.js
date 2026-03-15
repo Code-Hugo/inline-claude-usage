@@ -7,29 +7,28 @@
  * https://github.com/Code-Hugo/inline-claude-usage
  */
 
-const fs   = require('fs');
+const fs  = require('fs');
 const path = require('path');
-const os   = require('os');
+const os  = require('os');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const CONFIG_PATH = path.join(os.homedir(), '.claude', 'inline-claude-usage.json');
 
 const DEFAULTS = {
-  currency: 'EUR',
   currencySymbol: '€',
-  usdToLocalRate: 0.92,          // USD → EUR (update as needed)
-  monthlyCapUSD: 21.74,          // ~€20.00 at 0.92 rate
-  sessionLimitTokens: 500000,    // approx 5h window limit (configure for your plan)
-  weeklyLimitTokens: 2500000,    // approx 7d window limit (configure for your plan)
+  usdToLocalRate: 0.92,
+  monthlyCapUSD: 21.74,
+  sessionLimitTokens: 500000,
+  weeklyLimitTokens: 2500000,
   sessionWindowHours: 5,
   weeklyWindowDays: 7,
   pricing: {
-    'claude-opus-4-6':      { input: 15.00, cacheRead: 1.50, cacheWrite: 18.75, output: 75.00 },
-    'claude-sonnet-4-6':    { input:  3.00, cacheRead: 0.30, cacheWrite:  3.75, output: 15.00 },
-    'claude-sonnet-4-5':    { input:  3.00, cacheRead: 0.30, cacheWrite:  3.75, output: 15.00 },
-    'claude-haiku-4-5':     { input:  0.80, cacheRead: 0.08, cacheWrite:  1.00, output:  4.00 },
-    'claude-haiku-4-5-20251001': { input: 0.80, cacheRead: 0.08, cacheWrite: 1.00, output: 4.00 },
+    'claude-opus-4-6':           { input: 15.00, cacheRead: 1.50, cacheWrite: 18.75, output: 75.00 },
+    'claude-sonnet-4-6':         { input:  3.00, cacheRead: 0.30, cacheWrite:  3.75, output: 15.00 },
+    'claude-sonnet-4-5':         { input:  3.00, cacheRead: 0.30, cacheWrite:  3.75, output: 15.00 },
+    'claude-haiku-4-5':          { input:  0.80, cacheRead: 0.08, cacheWrite:  1.00, output:  4.00 },
+    'claude-haiku-4-5-20251001': { input:  0.80, cacheRead: 0.08, cacheWrite:  1.00, output:  4.00 },
   }
 };
 
@@ -41,7 +40,7 @@ function loadConfig() {
   }
 }
 
-// ── JSONL Reader ──────────────────────────────────────────────────────────────
+// ── JSONL Reader (for 5h / 7d / monthly — not provided by Claude Code) ────────
 
 function parseJSONLFile(filePath) {
   const entries = [];
@@ -54,14 +53,13 @@ function parseJSONLFile(filePath) {
         if (e.type === 'assistant' && e.message?.usage && e.timestamp) {
           entries.push({
             timestamp: new Date(e.timestamp),
-            sessionId: e.sessionId || '',
             model:     e.message.model || 'claude-sonnet-4-6',
             usage:     e.message.usage,
           });
         }
-      } catch { /* skip malformed line */ }
+      } catch { /* skip malformed */ }
     }
-  } catch { /* skip unreadable file */ }
+  } catch { /* skip unreadable */ }
   return entries;
 }
 
@@ -70,42 +68,19 @@ function collectAllEntries(claudeDir) {
   const entries = [];
   try {
     for (const project of fs.readdirSync(projectsDir)) {
-      const projectDir = path.join(projectsDir, project);
-      let files;
-      try { files = fs.readdirSync(projectDir); } catch { continue; }
-      for (const file of files) {
-        if (!file.endsWith('.jsonl')) continue;
-        entries.push(...parseJSONLFile(path.join(projectDir, file)));
-      }
-    }
-  } catch { /* no projects dir */ }
-  return entries.sort((a, b) => a.timestamp - b.timestamp);
-}
-
-// ── Current session: most recently modified JSONL ─────────────────────────────
-
-function getCurrentSessionEntries(claudeDir) {
-  const projectsDir = path.join(claudeDir, 'projects');
-  let latestPath = null, latestMtime = 0;
-  try {
-    for (const project of fs.readdirSync(projectsDir)) {
       const dir = path.join(projectsDir, project);
       let files;
       try { files = fs.readdirSync(dir); } catch { continue; }
       for (const file of files) {
         if (!file.endsWith('.jsonl')) continue;
-        const fp = path.join(dir, file);
-        try {
-          const { mtimeMs } = fs.statSync(fp);
-          if (mtimeMs > latestMtime) { latestMtime = mtimeMs; latestPath = fp; }
-        } catch { /* skip */ }
+        entries.push(...parseJSONLFile(path.join(dir, file)));
       }
     }
-  } catch { /* no projects dir */ }
-  return latestPath ? parseJSONLFile(latestPath) : [];
+  } catch {}
+  return entries.sort((a, b) => a.timestamp - b.timestamp);
 }
 
-// ── Calculations ──────────────────────────────────────────────────────────────
+// ── Costs ─────────────────────────────────────────────────────────────────────
 
 function costUSD(usage, model, pricing) {
   const p = pricing[model] || pricing['claude-sonnet-4-6'];
@@ -132,12 +107,12 @@ function pct(used, total) {
 
 const C = {
   reset:  '\x1b[0m',
-  cyan:   '\x1b[36m',   // model name
-  white:  '\x1b[37m',   // labels / separators
-  green:  '\x1b[32m',   // low usage / healthy
-  yellow: '\x1b[33m',   // medium usage / warning
-  red:    '\x1b[31m',   // high usage / over cap
-  dim:    '\x1b[2m',    // muted text (reset times, denominators)
+  cyan:   '\x1b[36m',
+  white:  '\x1b[37m',
+  green:  '\x1b[32m',
+  yellow: '\x1b[33m',
+  red:    '\x1b[31m',
+  dim:    '\x1b[2m',
 };
 
 function usageColor(p) {
@@ -146,9 +121,7 @@ function usageColor(p) {
   return C.green;
 }
 
-function c(color, text) {
-  return `${color}${text}${C.reset}`;
-}
+function c(color, text) { return `${color}${text}${C.reset}`; }
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -167,90 +140,72 @@ function fmtTokens(n) {
   return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
 }
 
-function fmtModel(modelId) {
-  // "claude-sonnet-4-6" → "Sonnet 4.6"
-  return modelId
-    .replace(/^claude-/, '')
-    .replace(/-(\d+)-(\d+)(-\d+)?$/, ' $1.$2')
-    .split('-')
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
-}
-
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-function main() {
+function main(claudeData) {
   const cfg      = loadConfig();
   const claudeDir = path.join(os.homedir(), '.claude');
   const now      = new Date();
 
-  const allEntries     = collectAllEntries(claudeDir);
-  const sessionEntries = getCurrentSessionEntries(claudeDir);
-
-  if (allEntries.length === 0) {
-    process.stdout.write('claude: no usage data\n');
-    return;
-  }
-
-  // Context window: sum of input-side tokens in the latest message of current session
-  let ctxTokens    = 0;
-  let currentModel = 'claude-sonnet-4-6';
-  if (sessionEntries.length > 0) {
-    const last   = sessionEntries[sessionEntries.length - 1];
-    currentModel = last.model;
-    ctxTokens    = (last.usage.input_tokens               || 0)
-                 + (last.usage.cache_read_input_tokens     || 0)
-                 + (last.usage.cache_creation_input_tokens || 0);
-  }
-
-  // Session cost (current session file)
-  const sessionCostUSD   = sessionEntries.reduce((s, e) => s + costUSD(e.usage, e.model, cfg.pricing), 0);
+  // ── From Claude Code stdin (accurate, no calculation needed) ──────────────
+  const modelName      = claudeData?.model?.display_name || 'Claude';
+  const ctxUsedPct     = Math.floor(claudeData?.context_window?.used_percentage || 0);
+  const ctxTotal       = claudeData?.context_window?.context_window_size || 200_000;
+  const ctxUsed        = claudeData?.context_window?.total_input_tokens || 0;
+  const sessionCostUSD = claudeData?.cost?.total_cost_usd || 0;
   const sessionCostLocal = sessionCostUSD * cfg.usdToLocalRate;
 
+  // ── From JSONL: 5h / 7d / monthly (not provided by Claude Code) ───────────
+  const allEntries = collectAllEntries(claudeDir);
+
   // 5h rolling window
-  const fiveHrAgo        = new Date(now - cfg.sessionWindowHours * 3_600_000);
-  const win5h            = allEntries.filter(e => e.timestamp >= fiveHrAgo);
-  const tokens5h         = win5h.reduce((s, e) => s + totalTokens(e.usage), 0);
-  const pct5h            = pct(tokens5h, cfg.sessionLimitTokens);
-  const reset5h          = win5h.length > 0
+  const fiveHrAgo = new Date(now - cfg.sessionWindowHours * 3_600_000);
+  const win5h     = allEntries.filter(e => e.timestamp >= fiveHrAgo);
+  const tokens5h  = win5h.reduce((s, e) => s + totalTokens(e.usage), 0);
+  const pct5h     = pct(tokens5h, cfg.sessionLimitTokens);
+  const reset5h   = win5h.length > 0
     ? new Date(win5h[0].timestamp.getTime() + cfg.sessionWindowHours * 3_600_000)
     : null;
 
   // 7d rolling window
-  const sevenDayAgo      = new Date(now - cfg.weeklyWindowDays * 86_400_000);
-  const win7d            = allEntries.filter(e => e.timestamp >= sevenDayAgo);
-  const tokens7d         = win7d.reduce((s, e) => s + totalTokens(e.usage), 0);
-  const pct7d            = pct(tokens7d, cfg.weeklyLimitTokens);
-  const reset7d          = win7d.length > 0
+  const sevenDayAgo = new Date(now - cfg.weeklyWindowDays * 86_400_000);
+  const win7d       = allEntries.filter(e => e.timestamp >= sevenDayAgo);
+  const tokens7d    = win7d.reduce((s, e) => s + totalTokens(e.usage), 0);
+  const pct7d       = pct(tokens7d, cfg.weeklyLimitTokens);
+  const reset7d     = win7d.length > 0
     ? new Date(win7d[0].timestamp.getTime() + cfg.weeklyWindowDays * 86_400_000)
     : null;
 
-  // Monthly extra spend
-  const monthStart       = new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthlyEntries   = allEntries.filter(e => e.timestamp >= monthStart);
-  const spendUSD         = monthlyEntries.reduce((s, e) => s + costUSD(e.usage, e.model, cfg.pricing), 0);
-  const spendLocal       = spendUSD * cfg.usdToLocalRate;
-  const capLocal         = cfg.monthlyCapUSD * cfg.usdToLocalRate;
-  const leftLocal        = Math.max(0, capLocal - spendLocal);
+  // Monthly spend
+  const monthStart     = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthlyEntries = allEntries.filter(e => e.timestamp >= monthStart);
+  const spendUSD       = monthlyEntries.reduce((s, e) => s + costUSD(e.usage, e.model, cfg.pricing), 0);
+  const spendLocal     = spendUSD * cfg.usdToLocalRate;
+  const capLocal       = cfg.monthlyCapUSD * cfg.usdToLocalRate;
+  const leftLocal      = Math.max(0, capLocal - spendLocal);
 
-  // ── Assemble output ────────────────────────────────────────────────────────
-  const sym  = cfg.currencySymbol;
-  const ctxW = 200_000; // all current Claude models have 200k context
-  const ctxPct = pct(ctxTokens, ctxW);
-  const sep  = c(C.dim, ' | ');
+  // ── Assemble ──────────────────────────────────────────────────────────────
+  const sym = cfg.currencySymbol;
+  const sep = c(C.dim, ' | ');
 
-  const ctxStr   = `ctx ${c(usageColor(ctxPct), `${fmtTokens(ctxTokens)}/${fmtTokens(ctxW)}`)} ${c(C.dim, `(${ctxPct}%)`)}`;
-  const costStr  = `cost ${c(C.white, `${sym}${sessionCostLocal.toFixed(2)}`)}`;
-  const str5h    = `5h ${c(usageColor(pct5h), `${pct5h}%`)}` + (reset5h ? c(C.dim, ` @${fmtTime(reset5h)}`) : '');
-  const str7d    = `7d ${c(usageColor(pct7d), `${pct7d}%`)}` + (reset7d ? c(C.dim, ` @${fmtDate(reset7d)}, ${fmtTime(reset7d)}`) : '');
+  const ctxStr  = `ctx ${c(usageColor(ctxUsedPct), `${fmtTokens(ctxUsed)}/${fmtTokens(ctxTotal)}`)} ${c(C.dim, `(${ctxUsedPct}%)`)}`;
+  const costStr = `cost ${c(C.white, `${sym}${sessionCostLocal.toFixed(2)}`)}`;
+  const str5h   = `5h ${c(usageColor(pct5h), `${pct5h}%`)}` + (reset5h ? c(C.dim, ` @${fmtTime(reset5h)}`) : '');
+  const str7d   = `7d ${c(usageColor(pct7d), `${pct7d}%`)}` + (reset7d ? c(C.dim, ` @${fmtDate(reset7d)}, ${fmtTime(reset7d)}`) : '');
 
-  const overCap    = spendLocal > capLocal;
-  const extraColor = overCap ? C.red : C.yellow;
-  const leftColor  = overCap ? C.red : C.green;
-  const extraStr   = `extra ${c(extraColor, `${sym}${spendLocal.toFixed(2)}/${sym}${capLocal.toFixed(2)}`)} ${c(leftColor, `(${sym}${leftLocal.toFixed(2)} left)`)}`;
+  const overCap  = spendLocal > capLocal;
+  const extraStr = `extra ${c(overCap ? C.red : C.yellow, `${sym}${spendLocal.toFixed(2)}/${sym}${capLocal.toFixed(2)}`)} ${c(overCap ? C.red : C.green, `(${sym}${leftLocal.toFixed(2)} left)`)}`;
 
-  const line = [c(C.cyan, fmtModel(currentModel)), ctxStr, costStr, str5h, str7d, extraStr].join(sep);
-  process.stdout.write(line + '\n');
+  process.stdout.write(
+    [c(C.cyan, modelName), ctxStr, costStr, str5h, str7d, extraStr].join(sep) + '\n'
+  );
 }
 
-main();
+// Claude Code sends JSON data via stdin — read it then run
+let input = '';
+process.stdin.on('data', chunk => input += chunk);
+process.stdin.on('end', () => {
+  let data = null;
+  try { data = JSON.parse(input); } catch {}
+  main(data);
+});

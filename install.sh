@@ -41,9 +41,10 @@ const file = process.argv[2];
 const cmd  = process.argv[3];
 let cfg = {};
 try { cfg = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
-cfg.statusCommand = cmd;
+delete cfg.statusCommand; // remove old format if present
+cfg.statusLine = { type: 'command', command: cmd };
 fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n');
-console.log('✓ statusCommand set in ' + file);
+console.log('✓ statusLine set in ' + file);
 EOF
 
 echo ""
