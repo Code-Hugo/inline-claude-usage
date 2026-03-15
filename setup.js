@@ -8,13 +8,37 @@
  */
 
 const readline = require('readline');
-const fs   = require('fs');
-const path = require('path');
-const os   = require('os');
+const https  = require('https');
+const fs     = require('fs');
+const path   = require('path');
+const os     = require('os');
 
 const CONFIG_PATH   = path.join(os.homedir(), '.claude', 'inline-claude-usage.json');
 const SETTINGS_PATH = path.join(os.homedir(), '.claude', 'settings.json');
 const INDEX_PATH    = path.join(__dirname, 'index.js');
+
+// ── Live exchange rates ───────────────────────────────────────────────────────
+// Fetches latest USD → X rates from api.frankfurter.app (free, no auth).
+// Resolves to a rates object or null on timeout / network error.
+async function fetchLiveRates() {
+  return new Promise(resolve => {
+    let settled = false;
+    const done = val => { if (!settled) { settled = true; resolve(val); } };
+    const req = https.get(
+      'https://api.frankfurter.app/latest?from=USD',
+      { timeout: 4000 },
+      res => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try { done(JSON.parse(data).rates || null); } catch { done(null); }
+        });
+      }
+    );
+    req.on('error', () => done(null));
+    req.on('timeout', () => { req.destroy(); done(null); });
+  });
+}
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 
@@ -134,6 +158,16 @@ function parseWeeklyReset(input) {
     wed: 3, wednesday: 3, thu: 4, thursday: 4, fri: 5, friday: 5, sat: 6, saturday: 6,
   };
   const s = input.trim().toLowerCase();
+
+  // Relative hours+minutes (e.g. "1h 30m", "2h") — reset is later today
+  const relHM = s.match(/^(\d+)\s*h(?:\s*(\d+)\s*m(?:in(?:utes?)?)?)?$/);
+  if (relHM) {
+    const h = parseInt(relHM[1]);
+    const m = parseInt(relHM[2] || '0');
+    const resetDate = new Date(Date.now() + (h * 60 + m) * 60_000);
+    const lp = localParts(resetDate);
+    return { day: lp.dow, hour: lp.hour, minute: lp.minute, sameDay: true };
+  }
 
   // Relative minutes only (e.g. "45m", "30 min") — reset is later today
   const relM = s.match(/^(\d+)\s*m(?:in(?:utes?)?)?$/);
@@ -359,6 +393,9 @@ async function main() {
   const isReconfig   = process.argv.includes('--reconfigure') || process.argv.includes('--configure') || Object.keys(existing).length > 0;
   const now = new Date();
 
+  // Kick off live rate fetch — runs in background during plan selection to hide latency
+  const liveRatesPromise = fetchLiveRates();
+
   console.log('');
   console.log(bold(cyan('  inline-claude-usage  ·  Setup')));
   console.log(dim('  ──────────────────────────────────────────'));
@@ -375,17 +412,29 @@ async function main() {
   const plan       = PLANS[planIdx];
   console.log(`  ${green('✓')} ${plan.label}\n`);
 
+  // Apply live rates now (fetch was running during plan selection)
+  const liveRates = await liveRatesPromise;
+  if (liveRates) {
+    for (const cur of CURRENCIES) {
+      if (cur.code !== 'USD' && liveRates[cur.code]) {
+        cur.rate = parseFloat(liveRates[cur.code].toFixed(4));
+      }
+    }
+  }
+
   // ── Step 2a — Currency picker (raw mode, before rl) ───────────────────────
   console.log(bold('  Step 2 — Currency\n'));
-  console.log(`  ${dim('Use ← → to select, Enter to confirm.')}\n`);
-  const defCurrencyIdx = Math.max(0,
-    CURRENCIES.findIndex(c => c.code === existing.currencyCode) ||
-    CURRENCIES.findIndex(c => c.symbol === existing.currencySymbol)
-  );
+  console.log(`  ${dim(liveRates ? 'Use ← → to select. Rates fetched live.' : 'Use ← → to select.')}\n`);
+  const defCurrencyIdx = (() => {
+    const byCode = CURRENCIES.findIndex(c => c.code === existing.currencyCode);
+    if (byCode !== -1) return byCode;
+    const bySym = CURRENCIES.findIndex(c => c.symbol === existing.currencySymbol);
+    return bySym !== -1 ? bySym : 0;
+  })();
   const currencyIdx = await selectHorizontal(
     CURRENCIES, defCurrencyIdx,
     c => `${c.symbol} ${c.code}`,
-    c => dim(`Exchange rate: 1 USD = ${c.rate} ${c.code}`)
+    c => dim(`${liveRates ? 'Live rate' : 'Rate'}: 1 USD = ${c.rate} ${c.code}`)
   );
   const currency = CURRENCIES[currencyIdx];
   console.log(`\n  ${green('✓')} ${currency.symbol} ${currency.code}\n`);
@@ -393,9 +442,10 @@ async function main() {
   // ── Step 2b — Rate (text, allows override) ────────────────────────────────
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
-  const defRate = existing.usdToLocalRate || currency.rate;
-  const rateRaw = await ask(rl, `  ${cyan('?')} Exchange rate        ${dim(`[1 USD = ${defRate} ${currency.code}]`)}: `);
-  const rate    = parseFloat(rateRaw) || defRate;
+  const defRate   = currency.rate; // always use current (live if fetched, otherwise preset)
+  const rateLabel = liveRates ? `live: 1 USD = ${defRate} ${currency.code}` : `1 USD = ${defRate} ${currency.code}`;
+  const rateRaw   = await ask(rl, `  ${cyan('?')} Exchange rate        ${dim(`[${rateLabel}]`)}: `);
+  const rate      = parseFloat(rateRaw) || defRate;
   const sym     = currency.symbol;
   console.log('');
 
@@ -405,8 +455,9 @@ async function main() {
     console.log(`  ${dim('On Team plan, billing goes to your organisation.')}`);
     console.log(`  ${dim("You may not have a personal budget — it's fine to say no.")}\n`);
   }
-  const knowCapRaw = await ask(rl, `  ${cyan('?')} Do you have a monthly budget for Claude? ${dim('[y/N]')}: `);
-  const knowCap    = knowCapRaw.toLowerCase() === 'y';
+  const hasExistingCap = (existing.monthlyCapUSD || 0) > 0;
+  const knowCapRaw = await ask(rl, `  ${cyan('?')} Do you have a monthly budget for Claude? ${dim(hasExistingCap ? '[Y/n]' : '[y/N]')}: `);
+  const knowCap    = hasExistingCap ? knowCapRaw.toLowerCase() !== 'n' : knowCapRaw.toLowerCase() === 'y';
 
   let capUSD = 0;
   if (knowCap) {
@@ -457,7 +508,11 @@ async function main() {
         }).format(resetDate).toLowerCase();
         console.log(`  ${green('✓')} Session anchored — resets at ${localTime}`);
       } else {
-        console.log(`  ${yellow('!')} Could not parse "${resetInRaw}" — will estimate from usage history`);
+        const looksLikeTime = /\d{1,2}:\d{2}/.test(resetInRaw);
+        const msg = looksLikeTime
+          ? 'That time has passed — enter a relative time like "4h 18m"'
+          : `Could not parse "${resetInRaw}"`;
+        console.log(`  ${yellow('!')} ${msg} — will estimate from usage history`);
       }
     }
 
