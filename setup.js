@@ -347,7 +347,7 @@ async function main() {
   try { existing = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); } catch {}
 
   const existingPlan = PLANS.find(p => p.key === existing.plan);
-  const isReconfig   = process.argv.includes('--reconfigure') || Object.keys(existing).length > 0;
+  const isReconfig   = process.argv.includes('--reconfigure') || process.argv.includes('--configure') || Object.keys(existing).length > 0;
   const now = new Date();
 
   console.log('');
